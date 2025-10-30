@@ -1,0 +1,406 @@
+name: Deploy to GCP
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        default: 'staging'
+      deploy_frontend:
+        required: false
+        type: boolean
+        default: true
+      deploy_backend:
+        required: false
+        type: boolean
+        default: true
+      deploy_visualizer:
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      GCP_SA_KEY:
+        required: true
+      SIGNING_SA_CREDENTIALS:
+        required: true
+      # Supabase Configuration
+      SUPABASE_URL:
+        required: true
+      SUPABASE_SERVICE_ROLE:
+        required: true
+      SUPABASE_ANON_KEY:
+        required: true
+      # Encryption
+      ENCRYPTION_KEY:
+        required: true
+      ENCRYPTION_SALT:
+        required: true
+      # External Services
+      DDX_API_BASE_URL:
+        required: false
+      BUCKET_NAME:
+        required: true
+      # Optional URL override (if not provided, will be generated from project number)
+      REDIRECT_URL:
+        required: false
+      # Supabase Database Deployment
+      SUPABASE_ACCESS_TOKEN:
+        required: false
+      SUPABASE_DB_PASSWORD:
+        required: false
+      SUPABASE_PROJECT_ID:
+        required: false
+      GCP_PROJECT_ID:
+        required: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      api_base_url: ${{ steps.setup.outputs.api_base_url }}
+      redirect_url: ${{ steps.setup.outputs.redirect_url }}
+      streamlit_url: ${{ steps.setup.outputs.streamlit_url }}
+      allowed_origins: ${{ steps.setup.outputs.allowed_origins }}
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Google Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+      
+      - name: Generate Service URLs and Setup Secrets
+        id: setup
+        run: |
+          # Get the current project ID from gcloud (set by the auth step)
+          PROJECT_ID=$(gcloud config get-value project)
+          echo "🔍 Current project ID: $PROJECT_ID"
+          
+          if [ -z "$PROJECT_ID" ]; then
+            echo "❌ ERROR: No project ID found in gcloud config!"
+            echo "This usually means the authentication step failed."
+            exit 1
+          fi
+          
+          # Get project number with error handling
+          echo "🔍 Getting project number for: $PROJECT_ID"
+          PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>&1)
+          
+          # Check if the command succeeded
+          if [ $? -ne 0 ] || [ -z "$PROJECT_NUMBER" ]; then
+            echo "❌ ERROR: Failed to get project number for $PROJECT_ID"
+            echo "Project number result: $PROJECT_NUMBER"
+            echo "This usually means:"
+            echo "1. The project ID is incorrect"
+            echo "2. The service account doesn't have permission to access the project"
+            echo "3. The project doesn't exist"
+            exit 1
+          fi
+          
+          echo "✅ Project number retrieved: $PROJECT_NUMBER"
+          ENVIRONMENT="${{ inputs.environment }}"
+          REGION="us-central1"
+          
+          # Generate service URLs using project number
+          API_BASE_URL="https://${ENVIRONMENT}-bem-reports-${PROJECT_NUMBER}.${REGION}.run.app"
+          STREAMLIT_URL="https://${ENVIRONMENT}-d3p-viewer-${PROJECT_NUMBER}.${REGION}.run.app"
+          
+          # Use provided REDIRECT_URL or generate default
+          if [ -n "${{ secrets.REDIRECT_URL }}" ]; then
+            REDIRECT_URL="${{ secrets.REDIRECT_URL }}"
+            echo "Using provided REDIRECT_URL: $REDIRECT_URL"
+          else
+            REDIRECT_URL="https://${ENVIRONMENT}-bem-reports-web-${PROJECT_NUMBER}.${REGION}.run.app"
+            echo "Generated REDIRECT_URL: $REDIRECT_URL"
+          fi
+          
+          # Generate ALLOWED_ORIGINS
+          ALLOWED_ORIGINS="${REDIRECT_URL},http://localhost:3000,http://localhost:8081"
+          
+          echo "Generated URLs:"
+          echo "  API_BASE_URL: $API_BASE_URL"
+          echo "  REDIRECT_URL: $REDIRECT_URL"
+          echo "  STREAMLIT_URL: $STREAMLIT_URL"
+          echo "  ALLOWED_ORIGINS: $ALLOWED_ORIGINS"
+          
+          # Output URLs for other jobs
+          echo "api_base_url=$API_BASE_URL" >> $GITHUB_OUTPUT
+          echo "redirect_url=$REDIRECT_URL" >> $GITHUB_OUTPUT
+          echo "streamlit_url=$STREAMLIT_URL" >> $GITHUB_OUTPUT
+          echo "allowed_origins=$ALLOWED_ORIGINS" >> $GITHUB_OUTPUT
+          
+          # Create secrets if they don't exist
+          create_or_update_secret() {
+            local secret_name=$1
+            local secret_value=$2
+            
+            # Create a temporary file to store the secret value
+            local temp_file=$(mktemp)
+            printf '%s' "$secret_value" > "$temp_file"
+            
+            if gcloud secrets describe $secret_name --project=$PROJECT_ID >/dev/null 2>&1; then
+              echo "Updating secret: $secret_name"
+              gcloud secrets versions add $secret_name --data-file="$temp_file"
+            else
+              echo "Creating secret: $secret_name"
+              gcloud secrets create $secret_name --data-file="$temp_file"
+            fi
+            
+            # Clean up temporary file
+            rm -f "$temp_file"
+          }
+          
+          # Set up all secrets
+          create_or_update_secret "${ENVIRONMENT^^}_SUPABASE_URL" "${{ secrets.SUPABASE_URL }}"
+          create_or_update_secret "${ENVIRONMENT^^}_SUPABASE_SERVICE_ROLE" "${{ secrets.SUPABASE_SERVICE_ROLE }}"
+          create_or_update_secret "${ENVIRONMENT^^}_SUPABASE_ANON_KEY" "${{ secrets.SUPABASE_ANON_KEY }}"
+          create_or_update_secret "${ENVIRONMENT^^}_ENCRYPTION_KEY" "${{ secrets.ENCRYPTION_KEY }}"
+          create_or_update_secret "${ENVIRONMENT^^}_ENCRYPTION_SALT" "${{ secrets.ENCRYPTION_SALT }}"
+          create_or_update_secret "${ENVIRONMENT^^}_BUCKET_NAME" "${{ secrets.BUCKET_NAME }}"
+          
+          # GitHub secret is already base64 encoded to preserve JSON formatting
+          echo "🔍 Debug: SIGNING_SA_CREDENTIALS from GitHub (base64 encoded):"
+          echo "📏 Base64 length from GitHub: $(printf '%s' "${{ secrets.SIGNING_SA_CREDENTIALS }}" | wc -c)"
+          echo "🔍 Debug: First 100 chars of base64 from GitHub:"
+          printf '%s' "${{ secrets.SIGNING_SA_CREDENTIALS }}" | head -c 100
+          echo ""
+          
+          # Decode the base64 from GitHub to get the original JSON
+          # Remove any newlines that might have been added
+          echo "🔧 Decoding SIGNING_SA_CREDENTIALS from base64..."
+          SIGNING_SA_JSON=$(printf '%s' "${{ secrets.SIGNING_SA_CREDENTIALS }}" | tr -d '\n\r' | base64 -d)
+          
+          # Debug: Show the decoded JSON
+          DEBUG_TEMP_FILE=$(mktemp)
+          printf '%s' "$SIGNING_SA_JSON" > "$DEBUG_TEMP_FILE"
+          DECODED_LENGTH=$(wc -c < "$DEBUG_TEMP_FILE")
+          echo "📏 Total length of decoded JSON: $DECODED_LENGTH"
+          
+          if [ "$DECODED_LENGTH" -eq 0 ]; then
+            echo "❌ ERROR: Decoded JSON is empty! Base64 decoding failed."
+            echo "This usually means the GitHub secret is not properly base64 encoded."
+            echo "Please encode your signing-key.json using: cat signing-key.json | base64 -w 0"
+            exit 1
+          fi
+          
+          echo "🔍 Debug: First 100 characters of decoded JSON:"
+          head -c 100 "$DEBUG_TEMP_FILE"
+          echo ""
+          echo "🔍 Debug: First 5 lines of decoded JSON:"
+          head -n 5 "$DEBUG_TEMP_FILE"
+          echo "🔍 Debug: Last 5 lines of decoded JSON:"
+          tail -n 5 "$DEBUG_TEMP_FILE"
+          
+          # Check if the decoded content is valid JSON
+          echo "🔍 Debug: Checking if decoded content is valid JSON..."
+          if echo "$SIGNING_SA_JSON" | jq . >/dev/null 2>&1; then
+            echo "✅ Decoded content is valid JSON"
+          else
+            echo "❌ Decoded content is NOT valid JSON!"
+            exit 1
+          fi
+          
+          rm -f "$DEBUG_TEMP_FILE"
+          
+          # Re-encode to base64 for storage in GCP Secret Manager
+          echo "🔧 Re-encoding to base64 for GCP Secret Manager..."
+          SIGNING_SA_BASE64=$(printf '%s' "$SIGNING_SA_JSON" | base64 -w 0)
+          
+          # Create temporary file for the base64 encoded credentials
+          SIGNING_TEMP_FILE=$(mktemp)
+          printf '%s' "$SIGNING_SA_BASE64" > "$SIGNING_TEMP_FILE"
+          
+          if gcloud secrets describe "SIGNING_SA_CREDENTIALS" --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Updating secret: SIGNING_SA_CREDENTIALS"
+            gcloud secrets versions add "SIGNING_SA_CREDENTIALS" --data-file="$SIGNING_TEMP_FILE"
+          else
+            echo "Creating secret: SIGNING_SA_CREDENTIALS"
+            gcloud secrets create "SIGNING_SA_CREDENTIALS" --data-file="$SIGNING_TEMP_FILE"
+          fi
+          
+          # Debug: Verify what was actually stored in the secret manager
+          echo "🔍 Debug: Verifying stored secret (base64 encoded) - first 100 characters:"
+          gcloud secrets versions access latest --secret="SIGNING_SA_CREDENTIALS" --project=$PROJECT_ID | head -c 100
+          echo ""
+          echo "🔍 Debug: Decoding and verifying stored secret - first 100 characters:"
+          gcloud secrets versions access latest --secret="SIGNING_SA_CREDENTIALS" --project=$PROJECT_ID | base64 -d | head -c 100
+          echo ""
+          echo "🔍 Debug: Decoding and verifying stored secret - first 5 lines:"
+          gcloud secrets versions access latest --secret="SIGNING_SA_CREDENTIALS" --project=$PROJECT_ID | base64 -d | head -n 5
+          
+          # Clean up temporary file
+          rm -f "$SIGNING_TEMP_FILE"
+          create_or_update_secret "${ENVIRONMENT^^}_API_BASE_URL" "$API_BASE_URL"
+          create_or_update_secret "${ENVIRONMENT^^}_REDIRECT_URL" "$REDIRECT_URL"
+          create_or_update_secret "${ENVIRONMENT^^}_STREAMLIT_URL" "$STREAMLIT_URL"
+          create_or_update_secret "${ENVIRONMENT^^}_ALLOWED_ORIGINS" "$ALLOWED_ORIGINS"
+          
+          # Optional secrets
+          if [ -n "${{ secrets.DDX_API_BASE_URL }}" ]; then
+            create_or_update_secret "${ENVIRONMENT^^}_DDX_API_BASE_URL" "${{ secrets.DDX_API_BASE_URL }}"
+          fi
+
+      - name: Configure Docker
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev
+
+  deploy-backend:
+    needs: setup
+    if: ${{ inputs.deploy_backend }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Google Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Configure Docker
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev
+
+      - name: Deploy Backend
+        working-directory: ./backend
+        run: |
+          ENVIRONMENT=${{ inputs.environment }}
+          PROJECT_ID=$(gcloud config get-value project)
+          IMAGE_NAME=us-central1-docker.pkg.dev/$PROJECT_ID/bem-reports/bem-reports:$ENVIRONMENT-${{ github.sha }}
+          SERVICE_NAME=$ENVIRONMENT-bem-reports
+          
+          docker build -t "$IMAGE_NAME" .
+          docker push $IMAGE_NAME
+          
+          SECRET_REFS="SUPABASE_URL=${ENVIRONMENT^^}_SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE=${ENVIRONMENT^^}_SUPABASE_SERVICE_ROLE:latest,ENCRYPTION_KEY=${ENVIRONMENT^^}_ENCRYPTION_KEY:latest,ENCRYPTION_SALT=${ENVIRONMENT^^}_ENCRYPTION_SALT:latest,REDIRECT_URL=${ENVIRONMENT^^}_REDIRECT_URL:latest,ALLOWED_ORIGINS=${ENVIRONMENT^^}_ALLOWED_ORIGINS:latest,DDX_API_BASE_URL=${ENVIRONMENT^^}_DDX_API_BASE_URL:latest,BUCKET_NAME=${ENVIRONMENT^^}_BUCKET_NAME:latest,SIGNING_SA_CREDENTIALS_BASE64=SIGNING_SA_CREDENTIALS:latest"
+          
+          gcloud run deploy "$SERVICE_NAME" \
+            --image="$IMAGE_NAME" \
+            --region=us-central1 \
+            --platform=managed \
+            --allow-unauthenticated \
+            --update-secrets="$SECRET_REFS" \
+            --set-env-vars="ENV=$ENVIRONMENT"
+
+  deploy-frontend:
+    needs: setup
+    if: ${{ inputs.deploy_frontend }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Google Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Configure Docker
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev
+
+      - name: Deploy Frontend
+        working-directory: ./frontend
+        run: |
+          ENVIRONMENT=${{ inputs.environment }}
+          PROJECT_ID=$(gcloud config get-value project)
+          IMAGE_NAME=us-central1-docker.pkg.dev/$PROJECT_ID/bem-reports/bem-reports-web:$ENVIRONMENT-${{ github.sha }}
+          SERVICE_NAME=$ENVIRONMENT-bem-reports-web
+          
+          # Get secrets for build args
+          SUPABASE_URL=$(gcloud secrets versions access latest --secret="${ENVIRONMENT^^}_SUPABASE_URL" --project=$PROJECT_ID)
+          SUPABASE_ANON_KEY=$(gcloud secrets versions access latest --secret="${ENVIRONMENT^^}_SUPABASE_ANON_KEY" --project=$PROJECT_ID)
+          API_BASE_URL="${{ needs.setup.outputs.api_base_url }}"
+          STREAMLIT_URL="${{ needs.setup.outputs.streamlit_url }}"
+          
+          docker build -t "$IMAGE_NAME" \
+            --build-arg NEXT_PUBLIC_ENV=$ENVIRONMENT \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="$SUPABASE_URL" \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+            --build-arg NEXT_PUBLIC_API_BASE_URL="$API_BASE_URL" \
+            --build-arg NEXT_PUBLIC_STREAMLIT_URL="$STREAMLIT_URL" .
+          
+          docker push $IMAGE_NAME
+          
+          SECRET_REFS="REDIRECT_URL=${ENVIRONMENT^^}_REDIRECT_URL:latest"
+          
+          gcloud run deploy "$SERVICE_NAME" \
+            --image="$IMAGE_NAME" \
+            --region=us-central1 \
+            --platform=managed \
+            --allow-unauthenticated \
+            --update-secrets="$SECRET_REFS"
+
+  deploy-visualizer:
+    needs: setup
+    if: ${{ inputs.deploy_visualizer }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Google Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Configure Docker
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev
+
+      - name: Deploy Visualizer
+        working-directory: ./visualizer
+        run: |
+          ENVIRONMENT=${{ inputs.environment }}
+          PROJECT_ID=$(gcloud config get-value project)
+          IMAGE_NAME=us-central1-docker.pkg.dev/$PROJECT_ID/bem-reports/d3p-viewer:$ENVIRONMENT-${{ github.sha }}
+          SERVICE_NAME=$ENVIRONMENT-d3p-viewer
+          
+          docker build -t "$IMAGE_NAME" .
+          docker push $IMAGE_NAME
+          
+          SECRET_REFS="SUPABASE_URL=${ENVIRONMENT^^}_SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE=${ENVIRONMENT^^}_SUPABASE_SERVICE_ROLE:latest,BUCKET_NAME=${ENVIRONMENT^^}_BUCKET_NAME:latest"
+          
+          gcloud run deploy "$SERVICE_NAME" \
+            --image="$IMAGE_NAME" \
+            --region=us-central1 \
+            --platform=managed \
+            --allow-unauthenticated \
+            --update-secrets="$SECRET_REFS" \
+            --set-env-vars="ENV=$ENVIRONMENT"
+
+  deploy-database:
+    needs: [setup, deploy-backend]
+    if: ${{ inputs.deploy_backend && !cancelled() && needs.deploy-backend.result == 'success' }}
+    uses: ./.github/workflows/deploy-database.yml
+    with:
+      environment: ${{ inputs.environment }}
+    secrets:
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+
+  output-urls:
+    needs: [setup, deploy-backend, deploy-frontend, deploy-visualizer, deploy-database]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Output Service URLs
+        run: |
+          echo "✅ Deployment complete!"
+          echo "🌐 Services deployed:"
+          echo "  - Backend: ${{ needs.setup.outputs.api_base_url }}"
+          echo "  - Frontend: ${{ needs.setup.outputs.redirect_url }}"
+          echo "  - Visualizer: ${{ needs.setup.outputs.streamlit_url }}"

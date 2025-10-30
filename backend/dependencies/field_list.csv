@@ -1,0 +1,32 @@
+field,fuel_source,higher_level_grouping
+Heating_Electricity,Electricity,Heating
+Heating_NaturalGas,NaturalGas,Heating
+Heating_DistrictHeating,DistrictHeating,Heating
+Heating_Other,Other,Heating
+Cooling_Electricity,Electricity,Cooling
+Cooling_DistrictHeating,DistrictHeating,Cooling
+Cooling_Other,Other,Cooling
+DHW_Electricity,Electricity,DHW
+DHW_NaturalGas,NaturalGas,DHW
+DHW_DistrictHeating,DistrictHeating,DHW
+DHW_Other,Other,DHW
+Interior Lighting_Electricity,Electricity,Lighting
+Exterior Lighting_Electricity,Electricity,Lighting
+Plug Loads_Electricity,Electricity,Other
+Fans_Electricity,Electricity,Fans
+Pumps_Electricity,Electricity,Pumps
+Pumps_NaturalGas,NaturalGas,Pumps
+Process Refrigeration_Electricity,Electricity,Other
+ExteriorUsage_Electricity,Electricity,Other
+ExteriorUsage_NaturalGas,NaturalGas,Other
+OtherEndUse_Electricity,Electricity,Other
+OtherEndUse_NaturalGas,NaturalGas,Other
+OtherEndUse_Other,Other,Other
+Heat Rejection_Electricity,Electricity,Other
+Humidification_Electricity,Electricity,Other
+HeatRecovery_Electricity,Electricity,Other
+HeatRecovery_Other,Other,Other
+SolarDHW_On-SiteRenewables,On-SiteRenewables,Renewables
+SolarPV_On-SiteRenewables,On-SiteRenewables,Renewables
+Wind_On-SiteRenewables,On-SiteRenewables,Renewables
+Other_On-SiteRenewables,On-SiteRenewables,Renewables

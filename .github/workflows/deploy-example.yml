@@ -1,0 +1,43 @@
+name: Deploy to My GCP Project
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - prod
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-to-gcp.yml
+    with:
+      gcp_project_id: 'bem-reports-test-1760844701'  # Replace with your actual GCP project ID
+      environment: ${{ inputs.environment }}
+    secrets:
+      # GCP Service Account Key (JSON format)
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      
+      # Supabase Configuration (environment-specific)
+      SUPABASE_URL: ${{ inputs.environment == 'prod' && secrets.PROD_SUPABASE_URL || secrets.STAGING_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE: ${{ inputs.environment == 'prod' && secrets.PROD_SUPABASE_SERVICE_ROLE || secrets.STAGING_SUPABASE_SERVICE_ROLE }}
+      SUPABASE_ANON_KEY: ${{ inputs.environment == 'prod' && secrets.PROD_SUPABASE_ANON_KEY || secrets.STAGING_SUPABASE_ANON_KEY }}
+      
+      # Encryption Keys (environment-specific)
+      ENCRYPTION_KEY: ${{ inputs.environment == 'prod' && secrets.PROD_ENCRYPTION_KEY || secrets.STAGING_ENCRYPTION_KEY }}
+      ENCRYPTION_SALT: ${{ inputs.environment == 'prod' && secrets.PROD_ENCRYPTION_SALT || secrets.STAGING_ENCRYPTION_SALT }}
+      
+      # External Services (optional, environment-specific)
+      DDX_API_BASE_URL: ${{ inputs.environment == 'prod' && secrets.PROD_DDX_API_BASE_URL || secrets.STAGING_DDX_API_BASE_URL }}
+      
+      # Storage (environment-specific)
+      BUCKET_NAME: ${{ inputs.environment == 'prod' && secrets.PROD_BUCKET_NAME || secrets.STAGING_BUCKET_NAME }}
+      # Signing credentials (shared across environments)
+      SIGNING_SA_CREDENTIALS: ${{ secrets.SIGNING_SA_CREDENTIALS }}
+      
+      # Optional: Override the default frontend URL (environment-specific)
+      REDIRECT_URL: ${{ inputs.environment == 'prod' && secrets.PROD_REDIRECT_URL || secrets.STAGING_REDIRECT_URL }}

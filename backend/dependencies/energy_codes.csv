@@ -1,0 +1,12 @@
+﻿code,energy_type
+EM1,elec
+FM,gas
+Stea,other
+Chil,other
+Hot,other
+DHW,other
+HW,other
+CHW,other
+BB,elec
+FM1,gas
+Pump,elec

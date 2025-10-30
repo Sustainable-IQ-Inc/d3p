@@ -1,0 +1,52 @@
+# .dockerignore
+cypress/
+cypress.config.ts
+
+# Development files
+.git
+.gitignore
+README.md
+.env*.local
+.vscode/
+.next/
+.swc/
+
+# Node modules (will be installed during build)
+node_modules/
+
+# Test files
+__tests__/
+**/*.test.js
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.js
+**/*.spec.ts
+**/*.spec.tsx
+
+# Documentation
+docs/
+*.md
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

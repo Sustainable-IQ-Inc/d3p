@@ -1,0 +1,11 @@
+﻿fuel_type,country,co2eq_per_kg_mbtu
+District Steam,us,66.4
+District Hot Water,us,66.4
+District Chilled Water - Electric Driven Chiller,us,52.7
+District Chilled Water - Absorption Chiller using Natural Gas,us,73.89
+District Chilled Water - Engine-Driven Chiller Natural Gas,us,49.31
+District Steam,canada,88.54
+District Hot Water,canada,88.54
+District Chilled Water - Electric Driven Chiller,canada,17.19
+District Chilled Water - Absorption Chiller using Natural Gas,canada,73.86
+District Chilled Water - Engine-Driven Chiller Natural Gas,canada,49.29

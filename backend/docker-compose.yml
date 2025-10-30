@@ -1,0 +1,8 @@
+version: '3.4'
+
+services:
+  bemreports:
+    image: bemreports
+    build:
+      context: .
+      dockerfile: ./Dockerfile
