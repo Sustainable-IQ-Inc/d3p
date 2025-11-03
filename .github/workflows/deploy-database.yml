@@ -34,6 +34,19 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
       
+      - name: Download seed files
+        working-directory: ./backend
+        run: |
+          ENVIRONMENT=${{ inputs.environment }}
+          # Only staging seed file exists; use it for all environments
+          echo "Downloading seed file (staging version used for all environments)..."
+          if gsutil cp gs://seed_files/seed.staging.sql supabase/seeds/seed.local.sql 2>/dev/null; then
+            echo "✅ Successfully downloaded seed file from GCS"
+          else
+            echo "⚠️  Seed file not found in GCS bucket (gs://seed_files/seed.staging.sql)"
+            echo "⚠️  Deployment will continue using seed files from repository if available"
+          fi
+      
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:

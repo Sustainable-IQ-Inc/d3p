@@ -236,6 +236,34 @@ gcloud artifacts repositories create bem-reports \
    
    **Troubleshooting**: If you get a 403 error when uploading files that mentions "does not have storage.objects.create access", run the above commands again to ensure permissions are properly set.
 
+4. **Create a GCS bucket for seed files** (optional but recommended):
+   
+   The deployment workflow can download an optional seed file from GCS to populate your database. This is especially useful for provisioning test or demo environments with example data, including test user login credentials and sample datasets, so that you can immediately log in as a demo user and view realistic data within d3p. 
+   
+   ```bash
+   # Create the seed_files bucket
+   gsutil mb gs://seed_files
+   
+   # Grant permissions to the deployment service account to read seed files
+   gsutil iam ch serviceAccount:bem-reports-deployer@$PROJECT_ID.iam.gserviceaccount.com:objectViewer gs://seed_files
+   ```
+   
+5. **Upload your seed file** (optional):
+   
+   If you have a `seed.staging.sql` file that you want to use for database seeding during deployment:
+   
+   ```bash
+   # Upload your seed file to the bucket
+   gsutil cp path/to/seed.staging.sql gs://seed_files/seed.staging.sql
+   ```
+   
+   **Note**: 
+   - The deployment workflow will attempt to download `seed.staging.sql` from the `seed_files` bucket
+   - If the file doesn't exist, the deployment will continue without it (the step is non-blocking)
+   - The downloaded seed file will be saved as `backend/supabase/seeds/seed.local.sql` and used during database deployment
+   - The seed file from GCS is used for both staging and production environments if provided
+   - If no seed file is uploaded to GCS, the deployment will use the seed files from the repository (`backend/supabase/seeds/seed.sql`)
+
 ### 7. Generate Encryption Keys
 
 Generate secure encryption keys for data protection which will be used for GitHub secrets in the next step:
