@@ -32,6 +32,12 @@ class ExportProjectToDDX(BaseModel):
 class ProjectIdsList(BaseModel):
     project_ids: List[str]
 
+class ExportProjectsCSVRequest(BaseModel):
+    company_id: Optional[str] = None
+    project_id: Optional[str] = None
+    search_term: Optional[str] = None
+    measurement_system: Optional[str] = 'imperial'
+
 @dataclass
 class ReportUpload:
     #report_type: Optional[int] = Form(...)

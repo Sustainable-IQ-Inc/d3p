@@ -21,6 +21,7 @@ import ShareToDDXModal from 'components/ShareToDDXModal';
 import { FetchDDXPreviewData } from 'app/api/ReturnDDXPreviewData';
 import { getDDXIntegrationStatus } from 'app/api/apiKeyService';
 import DDxShareButton from 'components/DDxShareButton';
+import ExportProjectsButton from 'components/ExportProjectsButton';
 import useUser from 'hooks/useUser';
 import { apiRequest } from 'utils/apiClient';
 
@@ -341,6 +342,10 @@ const ProjectDetailView = ({ params }: { params: { id: string } }) => {
               <DDxShareButton
                 onClick={toggleShareModal}
                 eeuDataEditDetails={eeuDataEditDetails}
+              />
+              <ExportProjectsButton
+                projectId={params.id}
+                measurementSystem="Imperial"
               />
               {user.role === 'superadmin' && (
                 <Button

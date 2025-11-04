@@ -21,10 +21,32 @@ def get_signing_client():
             return storage.Client.from_service_account_info(credentials_info)
         except Exception as e:
             print(f"Error decoding SIGNING_SA_CREDENTIALS_BASE64: {e}")
-            # Fall back to default credentials (won't be able to sign URLs)
+            # Try to use key.json file as fallback
+            key_json_path = os.path.join(os.path.dirname(__file__), '..', 'key.json')
+            if os.path.exists(key_json_path):
+                try:
+                    print(f"Falling back to key.json at {key_json_path}")
+                    return storage.Client.from_service_account_json(key_json_path)
+                except Exception as e2:
+                    print(f"Error using key.json: {e2}")
+            # Final fallback to default credentials (won't be able to sign URLs)
+            print("Warning: Using default credentials. URL signing may fail.")
             return storage.Client()
     else:
+        # Try to use key.json file if SIGNING_SA_CREDENTIALS_BASE64 is not set
+        key_json_path = os.path.join(os.path.dirname(__file__), '..', 'key.json')
+        if os.path.exists(key_json_path):
+            try:
+                print(f"Using key.json at {key_json_path} for GCS operations")
+                return storage.Client.from_service_account_json(key_json_path)
+            except Exception as e:
+                print(f"Error using key.json: {e}")
         # Fall back to default credentials (won't be able to sign URLs)
+        print("Warning: SIGNING_SA_CREDENTIALS_BASE64 not set and key.json not found. Using default credentials. URL signing may fail.")
+        print("To fix this, either:")
+        print("1. Set SIGNING_SA_CREDENTIALS_BASE64 environment variable, OR")
+        print("2. Ensure key.json exists in the project root, OR")
+        print("3. Set GOOGLE_APPLICATION_CREDENTIALS to point to your service account key file")
         return storage.Client()
 
 def get_signed_url_from_url(url, **kwargs):
@@ -121,7 +143,7 @@ def delete_blob(bucket_name, blob_name):
     # bucket_name = "your-bucket-name"
     # blob_name = "your-object-name"
 
-    storage_client = storage.Client()
+    storage_client = get_signing_client()
 
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)

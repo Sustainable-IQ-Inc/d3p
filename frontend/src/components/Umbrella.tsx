@@ -112,11 +112,13 @@ export const fuzzySort: SortingFn<TableDataProps> = (rowA, rowB, columnId) => {
 interface ReactTableProps {
   defaultColumns: ColumnDef<TableDataProps>[];
   data: TableDataProps[];
+  onFilteredDataChange?: (filteredData: TableDataProps[]) => void;
+  onSearchChange?: (searchTerm: string) => void;
 }
 
 // ==============================|| REACT TABLE ||============================== //
 
-function ReactTable({ defaultColumns, data }: ReactTableProps) {
+function ReactTable({ defaultColumns, data, onFilteredDataChange, onSearchChange }: ReactTableProps) {
   const theme = useTheme();
   const matchDownSM = useMediaQuery(theme.breakpoints.down("sm"));
 
@@ -190,6 +192,37 @@ function ReactTable({ defaultColumns, data }: ReactTableProps) {
   }, []); // Empty dependency array ensures this runs once after mount
 
   const backColor = alpha(theme.palette.primary.lighter, 0.1);
+
+  // Notify parent of search term changes
+  useEffect(() => {
+    if (onSearchChange) {
+      onSearchChange(globalFilter);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalFilter]);
+
+  // Notify parent of filtered data changes (including when there are no filters)
+  useEffect(() => {
+    if (onFilteredDataChange && data && data.length > 0) {
+      // Use a timeout to ensure table is fully initialized
+      const timeoutId = setTimeout(() => {
+        try {
+          const filteredRows = table.getFilteredRowModel().rows;
+          const filteredData = filteredRows.map(row => row.original);
+          onFilteredDataChange(filteredData);
+        } catch (error) {
+          // If table is not ready, just use all data
+          console.warn('Table not ready, using all data:', error);
+          onFilteredDataChange(data);
+        }
+      }, 0);
+      return () => clearTimeout(timeoutId);
+    } else if (onFilteredDataChange && (!data || data.length === 0)) {
+      // If no data, notify with empty array
+      onFilteredDataChange([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columnFilters, globalFilter, data]);
 
   let headers: (typeof LabelKeyObject & { label: string })[] = [];
   table.getVisibleLeafColumns().map(
@@ -466,6 +499,8 @@ interface TableProps<T> {
   pagination: string;
   title: string;
   clickToPage?: string;
+  onFilteredDataChange?: (filteredData: any[]) => void;
+  onSearchChange?: (searchTerm: string) => void;
 }
 const UmbrellaTable: React.FC<TableProps<any>> = ({
   data,
@@ -473,6 +508,8 @@ const UmbrellaTable: React.FC<TableProps<any>> = ({
   pagination,
   title,
   clickToPage,
+  onFilteredDataChange,
+  onSearchChange,
 }) => {
   const theme = useTheme();
 
@@ -526,7 +563,7 @@ const UmbrellaTable: React.FC<TableProps<any>> = ({
 
   return (
     <DndProvider backend={isMobile ? TouchBackend : HTML5Backend}>
-      <ReactTable {...{ data, defaultColumns: columns }} />
+      <ReactTable {...{ data, defaultColumns: columns, onFilteredDataChange, onSearchChange }} />
     </DndProvider>
   );
 };

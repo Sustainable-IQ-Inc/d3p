@@ -4,7 +4,10 @@ import os
 from supabase import create_client, Client
 from fastapi import HTTPException
 from fastapi.security import HTTPBearer
+from fastapi.responses import StreamingResponse
 import secrets
+import io
+from datetime import datetime
 
 import uvicorn
 
@@ -626,6 +629,334 @@ async def run_ddx_pre_validation(
             "message": f"Validation failed: {str(e)}"
         }
 
+
+@app.post("/export_projects_csv/")
+async def export_projects_csv(
+    request_body: models.ExportProjectsCSVRequest,
+    authorized: Dict[str, Union[bool, Optional[str]]] = Depends(verify_token)
+):
+    """
+    Export project data in the same format as the multi-project Excel template.
+    Can export either a single project (project_id) or all projects for a company (company_id).
+    Respects measurement system preference (Imperial/Metric).
+    """
+    if not authorized['is_authorized']:
+        return "not authorized"
+    
+    try:
+        # Extract parameters from request body
+        company_id = request_body.company_id
+        project_id = request_body.project_id
+        search_term = request_body.search_term
+        measurement_system = request_body.measurement_system or 'imperial'
+        from project_details import get_latest_eeu_data, get_uploads_for_project, get_upload_data
+        from weather_location import get_location_data
+        from conversions import convert_sf_to_m2, convert_gj_to_mbtu
+        from datetime import datetime
+        
+        # Define energy fields matching the template
+        eeu_energy_fields = [
+            'Heating_Electricity', 'Heating_NaturalGas', 'Heating_DistrictHeating', 'Heating_Other',
+            'Cooling_Electricity', 'Cooling_DistrictHeating', 'Cooling_Other',
+            'DHW_Electricity', 'DHW_NaturalGas', 'DHW_DistrictHeating', 'DHW_Other',
+            'Interior Lighting_Electricity', 'Exterior Lighting_Electricity', 'Plug Loads_Electricity',
+            'Process Refrigeration_Electricity', 'Fans_Electricity', 'Pumps_Electricity', 'Pumps_NaturalGas',
+            'Heat Rejection_Electricity', 'Humidification_Electricity', 'HeatRecovery_Electricity', 'HeatRecovery_Other',
+            'ExteriorUsage_Electricity', 'ExteriorUsage_NaturalGas', 'OtherEndUse_Electricity', 'OtherEndUse_NaturalGas', 'OtherEndUse_Other',
+            'SolarDHW_On-SiteRenewables', 'SolarPV_On-SiteRenewables', 'Wind_On-SiteRenewables', 'Other_On-SiteRenewables'
+        ]
+        
+        # Build query for project_energy_summary
+        query = supabase.table('project_energy_summary').select('*')
+        
+        # Handle company_id authorization
+        if authorized['role'] == 'superadmin':
+            if company_id is not None:
+                query = query.eq('company_id', company_id)
+        else:
+            company_id = authorized['company_id']
+            query = query.eq('company_id', company_id)
+        
+        # Filter by project_id if provided (single project export)
+        if project_id is not None:
+            query = query.eq('project_id', project_id)
+        # Filter by search_term if provided (search-based export from dashboard)
+        elif search_term and search_term.strip():
+            # Search across relevant text fields in project_energy_summary
+            search_term_clean = f'%{search_term.strip()}%'
+            # Use or_() with multiple conditions
+            query = query.or_(f'project_name.ilike.{search_term_clean},project_use_type.ilike.{search_term_clean},project_phase.ilike.{search_term_clean},climate_zone.ilike.{search_term_clean}')
+        
+        data, count = query.execute()
+        
+        if not data[1] or len(data[1]) == 0:
+            raise HTTPException(status_code=404, detail="No data found")
+        
+        # Normalize measurement system for comparison
+        measurement_system_lower = measurement_system.lower() if measurement_system else 'imperial'
+        is_metric = measurement_system_lower == 'metric'
+        
+        # Process each project to match template format
+        export_rows = []
+        
+        for project_summary in data[1]:
+            try:
+                proj_id = project_summary.get('project_id')
+                if not proj_id:
+                    continue
+                
+                # Get latest eeu_data for baseline and design
+                try:
+                    latest_eeu = get_latest_eeu_data(proj_id)
+                    if not isinstance(latest_eeu, dict):
+                        latest_eeu = {}
+                    baseline_id = latest_eeu.get('latest_baseline')
+                    design_id = latest_eeu.get('latest_design')
+                except Exception as e:
+                    print(f"Error getting latest eeu_data for project {proj_id}: {e}")
+                    baseline_id = None
+                    design_id = None
+                
+                # Fetch baseline and design eeu_data
+                baseline_data = {}
+                design_data = {}
+                location_data = {}
+                upload_data = {}
+                
+                if baseline_id:
+                    try:
+                        eeu_query = supabase.table('eeu_data').select('*').eq('id', baseline_id).limit(1)
+                        eeu_resp, _ = eeu_query.execute()
+                        if eeu_resp and len(eeu_resp) > 1 and eeu_resp[1]:
+                            baseline_data = eeu_resp[1][0]
+                    except Exception as e:
+                        print(f"Error fetching baseline eeu_data for project {proj_id}: {e}")
+                        baseline_data = {}
+                
+                if design_id:
+                    try:
+                        eeu_query = supabase.table('eeu_data').select('*').eq('id', design_id).limit(1)
+                        eeu_resp, _ = eeu_query.execute()
+                        if eeu_resp and len(eeu_resp) > 1 and eeu_resp[1]:
+                            design_data = eeu_resp[1][0]
+                    except Exception as e:
+                        print(f"Error fetching design eeu_data for project {proj_id}: {e}")
+                        design_data = {}
+                
+                # Get location data (prefer design, fallback to baseline)
+                location_id = design_id or baseline_id
+                if location_id:
+                    try:
+                        location_data = get_location_data(location_id)
+                        if not isinstance(location_data, dict):
+                            location_data = {}
+                    except Exception as e:
+                        print(f"Error getting location data for project {proj_id}: {e}")
+                        location_data = {}
+                
+                # Get upload data for additional fields
+                try:
+                    uploads = get_uploads_for_project(proj_id)
+                    if uploads and len(uploads) > 0:
+                        upload_id = uploads[-1]['id']
+                        upload_data = get_upload_data(upload_id)
+                        if not isinstance(upload_data, dict):
+                            upload_data = {}
+                except Exception as e:
+                    print(f"Error getting upload data for project {proj_id}: {e}")
+                    upload_data = {}
+                
+                # Build row matching template format
+                row = {}
+                
+                # Project ID - use custom_project_id if available, otherwise use project_id (same as DDX export)
+                custom_id = upload_data.get('custom_project_id') if isinstance(upload_data, dict) else None
+                row['project_id'] = str(custom_id) if custom_id else str(proj_id)
+                
+                # Shared fields (non-energy)
+                row['project_name'] = project_summary.get('project_name', '')
+                
+                # Handle area - convert if metric
+                conditioned_area = project_summary.get('conditioned_area')
+                if conditioned_area is not None:
+                    try:
+                        if is_metric:
+                            row['conditioned_area_sf'] = convert_sf_to_m2(float(conditioned_area))
+                        else:
+                            row['conditioned_area_sf'] = float(conditioned_area)
+                    except (ValueError, TypeError):
+                        row['conditioned_area_sf'] = ''
+                else:
+                    row['conditioned_area_sf'] = ''
+                
+                # Get zip_code, city, state from location_data (DDX-style)
+                row['zip_code'] = str(location_data.get('zip_code', '')) if location_data.get('zip_code') else ''
+                row['city'] = str(location_data.get('city', '')) if location_data.get('city') else ''
+                row['state'] = str(location_data.get('state', '')) if location_data.get('state') else ''
+                row['country'] = 'United States'  # Default as per DDX export
+                
+                row['project_use_type'] = project_summary.get('project_use_type', '')
+                row['project_construction_category'] = project_summary.get('project_construction_category_name', '')
+                row['project_phase'] = project_summary.get('project_phase', '')
+                row['energy_code'] = project_summary.get('energy_code_name', '')
+                row['report_type'] = project_summary.get('report_type_name', '')
+                
+                # Reporting year - from upload_data
+                if upload_data.get('reporting_year'):
+                    row['reporting_year'] = str(upload_data.get('reporting_year'))
+                elif upload_data.get('year'):
+                    row['reporting_year'] = str(upload_data.get('year'))
+                else:
+                    row['reporting_year'] = str(datetime.now().year)
+                
+                # Estimated occupancy year (DDX field)
+                if upload_data.get('year'):
+                    row['estimated_occupancy_year'] = str(upload_data.get('year'))
+                else:
+                    row['estimated_occupancy_year'] = str(datetime.now().year)
+                
+                # Area units
+                row['area_units'] = 'sm' if is_metric else 'sf'
+                
+                # Climate zone - extract just the code (before ' - ')
+                climate_zone_full = project_summary.get('climate_zone')
+                if climate_zone_full and isinstance(climate_zone_full, str):
+                    if ' - ' in climate_zone_full:
+                        row['climate_zone'] = climate_zone_full.split(' - ')[0]
+                    else:
+                        row['climate_zone'] = climate_zone_full
+                else:
+                    row['climate_zone'] = ''
+                
+                # Energy units - from eeu_data, default to mbtu
+                energy_units = 'mbtu'
+                if isinstance(design_data, dict) and design_data.get('energy_units'):
+                    energy_units = design_data.get('energy_units')
+                elif isinstance(baseline_data, dict) and baseline_data.get('energy_units'):
+                    energy_units = baseline_data.get('energy_units')
+                row['energy_units'] = energy_units
+                
+                # DDX additional fields
+                # Baseline EUI
+                baseline_eui = project_summary.get('total_energy_per_unit_area_baseline')
+                if baseline_eui is not None:
+                    row['baseline_eui'] = float(baseline_eui)
+                else:
+                    row['baseline_eui'] = ''
+                
+                # Predicted/Design EUI
+                design_eui = project_summary.get('total_energy_per_unit_area_design')
+                if design_eui is not None:
+                    row['predicted_eui'] = float(design_eui)
+                else:
+                    row['predicted_eui'] = ''
+                
+                # Add all energy fields with baseline and design suffixes
+                for energy_field in eeu_energy_fields:
+                    # Baseline value
+                    baseline_value = baseline_data.get(energy_field) if isinstance(baseline_data, dict) else None
+                    if baseline_value is not None:
+                        try:
+                            # Convert to MBTU if needed
+                            if energy_units == 'gj':
+                                row[f'{energy_field}_baseline'] = convert_gj_to_mbtu(float(baseline_value))
+                            elif energy_units == 'kbtu' or energy_units == 'kbtu/sf':
+                                row[f'{energy_field}_baseline'] = float(baseline_value) / 1000.0  # Convert kBtu to MBtu
+                            else:
+                                row[f'{energy_field}_baseline'] = float(baseline_value)
+                        except (ValueError, TypeError):
+                            row[f'{energy_field}_baseline'] = 0.0
+                    else:
+                        row[f'{energy_field}_baseline'] = 0.0
+                    
+                    # Design value
+                    design_value = design_data.get(energy_field) if isinstance(design_data, dict) else None
+                    if design_value is not None:
+                        try:
+                            # Convert to MBTU if needed
+                            if energy_units == 'gj':
+                                row[f'{energy_field}_design'] = convert_gj_to_mbtu(float(design_value))
+                            elif energy_units == 'kbtu' or energy_units == 'kbtu/sf':
+                                row[f'{energy_field}_design'] = float(design_value) / 1000.0  # Convert kBtu to MBtu
+                            else:
+                                row[f'{energy_field}_design'] = float(design_value)
+                        except (ValueError, TypeError):
+                            row[f'{energy_field}_design'] = 0.0
+                    else:
+                        row[f'{energy_field}_design'] = 0.0
+                
+                export_rows.append(row)
+            except Exception as e:
+                print(f"Error processing project {project_summary.get('project_id', 'unknown')}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Continue with next project instead of failing entirely
+                continue
+        
+        if not export_rows:
+            raise HTTPException(status_code=404, detail="No project data could be exported")
+        
+        # Create DataFrame with proper column order matching template
+        shared_fields = [
+            'project_id', 'project_name', 'conditioned_area_sf', 'zip_code', 'city', 'state', 'country',
+            'project_use_type', 'project_construction_category', 'project_phase', 'energy_code', 'report_type',
+            'reporting_year', 'estimated_occupancy_year', 'area_units', 'climate_zone', 'energy_units',
+            'baseline_eui', 'predicted_eui'
+        ]
+        
+        # Build column order: shared fields, then baseline energy fields, then design energy fields
+        column_order = shared_fields.copy()
+        for field in eeu_energy_fields:
+            column_order.append(f'{field}_baseline')
+        for field in eeu_energy_fields:
+            column_order.append(f'{field}_design')
+        
+        # Create DataFrame
+        df = pd.DataFrame(export_rows)
+        
+        # Ensure all columns exist (fill missing with empty/0)
+        for col in column_order:
+            if col not in df.columns:
+                df[col] = 0.0 if col.endswith('_baseline') or col.endswith('_design') else ''
+        
+        # Reorder columns to match template
+        df = df[column_order]
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        df.to_csv(output, index=False)
+        csv_content = output.getvalue()
+        
+        # Determine filename
+        if project_id:
+            try:
+                project_query = supabase.table('projects').select('project_name').eq('id', project_id).limit(1)
+                project_data, _ = project_query.execute()
+                project_name = project_data[1][0]['project_name'] if project_data[1] else 'project'
+                project_name = "".join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).strip().replace(' ', '-')
+                filename = f"d3p-project-{project_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+            except:
+                filename = f"d3p-project-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        else:
+            filename = f"d3p-portfolio-export-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        
+        # Create StreamingResponse
+        return StreamingResponse(
+            io.BytesIO(csv_content.encode('utf-8')),
+            media_type='text/csv',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Type': 'text/csv; charset=utf-8'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error exporting projects CSV: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error exporting data: {str(e)}")
 
 @app.delete("/projects/{project_id}/")
 async def delete_project(project_id: str, authorized: Dict[str, Union[bool, Optional[str]]] = Depends(verify_token)):
