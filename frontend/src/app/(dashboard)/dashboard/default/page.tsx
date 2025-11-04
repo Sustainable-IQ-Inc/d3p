@@ -43,7 +43,6 @@ const DashboardDefault = () => {
   const { user } = useUser();
   const [isLoading, setIsLoading] = useState(true);
   const [data, setData] = useState<TableDataProps[]>([]);
-  const [filteredData, setFilteredData] = useState<TableDataProps[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const { reloadData } = useDataReload();
   const [measurementSystem, setMeasurementSystem] = useState("Imperial");
@@ -55,8 +54,6 @@ const DashboardDefault = () => {
     getProjectList(companyView, false, measurementSystem).then(
       (projectList: TableDataProps[]) => {
         setData(projectList);
-        // Initialize filteredData with all data when projects are loaded
-        setFilteredData(projectList || []);
         setIsLoading(false);
       }
     );
@@ -245,7 +242,6 @@ const DashboardDefault = () => {
                 columnsNew={columns}
                 pagination={"bottom"}
                 title={"Projects"}
-                onFilteredDataChange={setFilteredData}
                 onSearchChange={setSearchTerm}
               />
             )}
