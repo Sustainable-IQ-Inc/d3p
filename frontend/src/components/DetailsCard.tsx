@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { Grid, Typography, IconButton, CardContent, Button, TextField, InputAdornment, Tooltip } from "@mui/material";
 import MainCard from "components/MainCard";
 import EditIcon from "@mui/icons-material/Edit";
@@ -43,8 +43,8 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
     const { reloadData } = useDataReload();
 
 
-    // Store initial form values in a ref to persist them across renders
-    const initialFormValuesRef = useRef({
+    // Store initial form values - use state so Formik can react to changes
+    const [initialFormValues, setInitialFormValues] = useState({
       project_id: editableData.project_id,
       energy_code_id: editableData.energy_code_id,
       project_construction_category_id: editableData.project_construction_category_id,
@@ -56,6 +56,43 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
       custom_project_id: editableData.custom_project_id || editableData.project_id,
       use_type_total_area: editableData.use_type_total_area
     });
+
+    // Also keep a ref for comparison in onSubmit (refs don't change during form editing)
+    // This ref will be updated when editing starts to capture the baseline
+    const initialFormValuesRef = useRef(initialFormValues);
+    
+    // Keep ref in sync with state when state changes (but only when editing starts, via useEffect)
+
+    // Track previous isEditing state to detect when editing starts
+    const prevIsEditingRef = useRef(isEditing);
+
+    // Update the initial values ONLY when editing starts (transitions from false to true)
+    // This ensures we capture the baseline values before any edits, not after data reloads
+    useEffect(() => {
+      const wasEditing = prevIsEditingRef.current;
+      const isNowEditing = isEditing;
+      
+      // Only update when transitioning from not editing to editing
+      if (!wasEditing && isNowEditing) {
+        const newInitialValues = {
+          project_id: editableData.project_id,
+          energy_code_id: editableData.energy_code_id,
+          project_construction_category_id: editableData.project_construction_category_id,
+          project_phase_id: editableData.project_phase_id,
+          year: editableData.year,
+          reporting_year: editableData.reporting_year || editableData.year,
+          user_id: editableData.user_id,
+          project_use_type_id: editableData.project_use_type_id,
+          custom_project_id: editableData.custom_project_id || editableData.project_id,
+          use_type_total_area: editableData.use_type_total_area
+        };
+        setInitialFormValues(newInitialValues);
+        initialFormValuesRef.current = newInitialValues;
+        console.log("Captured initial form values for comparison:", newInitialValues);
+      }
+      
+      prevIsEditingRef.current = isEditing;
+    }, [isEditing, editableData]);
 
     const [zipCode, setZipCode] = useState<string>("");
     const [isZipValid, setIsZipValid] = useState<boolean>(false);
@@ -96,8 +133,14 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
 
     return (
       <Formik
-      initialValues={initialFormValuesRef.current}
+      initialValues={initialFormValues}
+      enableReinitialize={true}
       onSubmit={async (values, { resetForm }) => { // Removed initialFormValues from destructuring
+        console.log("=== FORM SUBMISSION DEBUG ===");
+        console.log("Current form values:", values);
+        console.log("Initial values ref:", initialFormValuesRef.current);
+        console.log("Initial values state:", initialFormValues);
+        
         // Compare current values with initial values to find changed fields
         const updatedData = Object.keys(values).reduce((acc: Record<string, any>, key) => {
           const newValue = values[key as keyof typeof values];
@@ -106,10 +149,19 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
           console.log(`Comparing ${key}:`, { 
             newValue, 
             oldValue, 
-            type: typeof newValue 
+            newType: typeof newValue,
+            oldType: typeof oldValue,
+            equal: newValue === oldValue,
+            looseEqual: newValue == oldValue
           });
 
-          if (newValue !== oldValue) {
+          // Compare values, handling type coercion for numbers/strings
+          // Convert both to strings for comparison to handle number/string mismatches
+          const newValueStr = newValue != null ? String(newValue) : null;
+          const oldValueStr = oldValue != null ? String(oldValue) : null;
+          
+          if (newValueStr !== oldValueStr) {
+            console.log(`  -> Field ${key} changed: "${oldValueStr}" -> "${newValueStr}"`);
             acc[key] = newValue;
           }
           return acc;
@@ -198,9 +250,9 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
                           <Field
                             name="custom_project_id"
                             type="text"
-                            value={values.custom_project_id || editableData.project_id}
+                            value={values.custom_project_id || values.project_id}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                              handleFieldChange("custom_project_id", e.target.value);
+                              // Only update Formik - don't update editableData during editing
                               setFieldValue("custom_project_id", e.target.value);
                             }}
                             style={{
@@ -227,16 +279,16 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
                               {isEditing ? (
                                 <Field
                                   component={EnumList}
-                                  name="project_use_type"
+                                  name="project_use_type_id"
                                   params={{
                                     enum_name: "project_use_types",
                                     label: "Use Type",
                                     required: true,
-                                    populateValue: editableData.project_use_type_id || undefined,
+                                    populateValue: values.project_use_type_id || undefined,
                                   }}
                                   onChange={(value: number) => {
-                                    handleEnumChange("project_use_type_id", value);
-                                    setFieldValue("project_use_type_id", value); // Update Formik state
+                                    // Only update Formik - don't update editableData during editing
+                                    setFieldValue("project_use_type_id", value);
                                   }}
                                 />
                               ) : (
@@ -325,8 +377,8 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
                                 required: true,
                               }}
                               onChange={(value: number) => {
-                                handleFieldChange("year", value.toString());
-                                setFieldValue("year", value); // Update Formik state
+                                // Only update Formik - don't update editableData during editing
+                                setFieldValue("year", value);
                               }}
                             />
                           ) : (
@@ -349,8 +401,8 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
                                 required: true,
                               }}
                               onChange={(value: number) => {
-                                handleFieldChange("reporting_year", value.toString());
-                                setFieldValue("reporting_year", value); // Update Formik state
+                                // Only update Formik - don't update editableData during editing
+                                setFieldValue("reporting_year", value);
                               }}
                             />
                           ) : (
@@ -371,11 +423,11 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
                                 enum_name: "project_phases",
                                 label: "Project Phase",
                                 required: true,
-                                populateValue: editableData.project_phase_id || undefined,
+                                populateValue: values.project_phase_id || undefined,
                               }}
                               onChange={(value: number) => {
-                                handleEnumChange("project_phase_id", value);
-                                setFieldValue("project_phase_id", value); // Update Formik state
+                                // Only update Formik - don't update editableData during editing
+                                setFieldValue("project_phase_id", value);
                               }}
                             />
                           ) : (
@@ -396,11 +448,11 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
                                 enum_name: "project_construction_categories",
                                 label: "Construction Category",
                                 required: true,
-                                populateValue: editableData.project_construction_category_id || undefined,
+                                populateValue: values.project_construction_category_id || undefined,
                               }}
                               onChange={(value: number) => {
-                                handleEnumChange("project_construction_category_id", value);
-                                setFieldValue("project_construction_category_id", value); // Update Formik state
+                                // Only update Formik - don't update editableData during editing
+                                setFieldValue("project_construction_category_id", value);
                               }}
                             />
                           ) : (
@@ -421,11 +473,11 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
                                 enum_name: "energy_codes",
                                 label: "Energy Code",
                                 required: true,
-                                populateValue: editableData.energy_code_id || undefined,
+                                populateValue: values.energy_code_id || undefined,
                               }}
                               onChange={(value: number) => {
-                                handleEnumChange("energy_code_id", value);
-                                setFieldValue("energy_code_id", value); // Update Formik state
+                                // Only update Formik - don't update editableData during editing
+                                setFieldValue("energy_code_id", value);
                               }}
                             />
                           ) : (
@@ -449,10 +501,11 @@ const DetailsCard: React.FC<DetailsCardProps> = ({
                           {isEditing ? (
                             <TextField
                               type="number"
-                              value={editableData.use_type_total_area || ''}
+                              value={values.use_type_total_area || ''}
                               onChange={(e) => {
                                 const value = e.target.value;
-                                handleFieldChange("use_type_total_area", value);
+                                // Only update Formik - don't update editableData during editing
+                                setFieldValue("use_type_total_area", value);
                               }}
                               style={{
                                 textAlign: "right",

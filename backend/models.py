@@ -61,7 +61,12 @@ class Project(BaseModel):
 class ProjectUpdate(BaseModel):
     project_id: str
     project_name: Optional[str] = None
-    project_use_type_id: Optional[str] = None
+    project_use_type_id: Optional[int] = None
+    energy_code_id: Optional[int] = None
+    project_construction_category_id: Optional[int] = None
+    project_phase_id: Optional[int] = None
+    year: Optional[int] = None
+    reporting_year: Optional[int] = None
     custom_project_id: Optional[str] = None
     user_id: str
     use_type_total_area: Optional[str] = None
