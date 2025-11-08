@@ -20,6 +20,7 @@ import { FetchDDXPreviewData } from 'app/api/ReturnDDXPreviewData';
 import { getDDXIntegrationStatus } from 'app/api/apiKeyService';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import DDxShareButton from './DDxShareButton';
+import ExportProjectsButton from './ExportProjectsButton';
 
 interface ProjectDetailSectionProps {
   data: any;
@@ -288,6 +289,10 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
               <DDxShareButton
                 onClick={toggleShareModal}
                 operationalEnergyData={operationalEnergyData}
+              />
+              <ExportProjectsButton
+                projectId={data.project_id}
+                measurementSystem="Imperial"
               />
               
               <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>

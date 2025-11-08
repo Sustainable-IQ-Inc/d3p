@@ -47,6 +47,12 @@ def check_custom_project_id_uniqueness(custom_project_id: str, project_id: str, 
 def update_project_record(item,user_id):
     item_data = item.model_dump(exclude_none=True)
     project_id = item_data.pop('project_id')
+    
+    # Remove user_id from item_data - it's not a column in projects table, only used for history
+    item_data.pop('user_id', None)
+    
+    print(f"update_project_record called with item_data keys: {list(item_data.keys())}")
+    print(f"item_data values: {item_data}")
 
     # Check custom_project_id uniqueness if it's being updated
     if 'custom_project_id' in item_data:
@@ -70,20 +76,67 @@ def update_project_record(item,user_id):
             print(f"Error validating custom_project_id: {e}")
             return "validation_error"
 
-    try:
-        data, count = supabase.table('projects')\
-            .update(item_data)\
-            .eq('id', project_id)\
-            .execute()
+    # Fields that need to be synced to uploads table (used by project_energy_summary view)
+    # These fields don't exist in projects table, only in uploads table
+    fields_to_sync_to_uploads = [
+        'project_use_type_id',
+        'project_construction_category_id',
+        'energy_code_id',
+        'project_phase_id',
+        'year',
+        'reporting_year'
+    ]
+    
+    # Check if any fields that need to be synced to uploads are being updated
+    upload_update_data = {k: v for k, v in item_data.items() if k in fields_to_sync_to_uploads}
+    print(f"Fields to sync to uploads: {fields_to_sync_to_uploads}")
+    print(f"Upload update data found: {upload_update_data}")
+    
+    # Remove fields that belong in uploads table from item_data (they don't exist in projects table)
+    projects_table_data = {k: v for k, v in item_data.items() if k not in fields_to_sync_to_uploads}
+    print(f"Projects table data: {projects_table_data}")
+    
+    # Only update projects table if there are fields that belong there
+    if projects_table_data:
         try:
-            for key, value in item_data.items():
-                add_event_history('projects',key,project_id,value,user_id)
+            data, count = supabase.table('projects')\
+                .update(projects_table_data)\
+                .eq('id', project_id)\
+                .execute()
+            try:
+                for key, value in projects_table_data.items():
+                    add_event_history('projects',key,project_id,value,user_id)
+            except Exception as e:
+                print(e)
+                print("error logging history")
         except Exception as e:
             print(e)
-            print("error logging history")
-    except Exception as e:
-        print(e)
-        return "error"
+            return "error"
+    else:
+        print("No fields to update in projects table")
+    
+    # If fields that appear in project_energy_summary view are being updated, also update uploads
+    if upload_update_data:
+        print(f"Syncing fields to uploads table: {upload_update_data}")
+        try:
+            # Values are already integers from ProjectUpdate model, pass them through
+            print(f"Upload update data to sync: {upload_update_data}")
+            
+            # Use the baseline and design update function to update both uploads
+            upload_update_item = models.UploadUpdate(project_id=project_id, **upload_update_data)
+            upload_result = update_upload_record_baseline_and_design(upload_update_item, user_id)
+            print(f"Upload update result: {upload_result}")
+            if upload_result == "error":
+                print(f"ERROR: Failed to update uploads table - no uploads found or all updates failed")
+                return "error"
+            elif upload_result == "partial":
+                print(f"WARNING: Some upload updates failed")
+                # Continue anyway, projects table was updated
+        except Exception as e:
+            print(f"EXCEPTION in updating uploads table: {e}")
+            import traceback
+            traceback.print_exc()
+            return "error"
     
     return "success"
 def update_eeu_record(item, user_id,**kwargs):
@@ -93,13 +146,13 @@ def update_eeu_record(item, user_id,**kwargs):
 
     try:
         # Retrieve the current state of the record
-        current_data, _ = supabase.table('eeu_data')\
+        current_data_response = supabase.table('eeu_data')\
             .select('*')\
             .eq('id', eeu_id)\
             .execute()
         
         # Update the record
-        data, count = supabase.table('eeu_data')\
+        update_response = supabase.table('eeu_data')\
             .update(item_data)\
             .eq('id', eeu_id)\
             .execute()
@@ -107,7 +160,7 @@ def update_eeu_record(item, user_id,**kwargs):
         try:
             for key, value in item_data.items():
                 # Get the previous value
-                previous_value = current_data[1][0].get(key)
+                previous_value = current_data_response.data[0].get(key) if current_data_response.data else None
                 add_event_history('eeu_data', key, eeu_id, value, user_id, previous_value)
         except Exception as e:
             print("error logging history")
@@ -201,114 +254,142 @@ def run_calcs_eeu(changed_field_name,eeu_id):
     update_eeu_data_total(df_fields,eeu_id)
 
 def update_upload_record_baseline_and_design(item, user_id):
-    """Update both baseline and design upload records for project_use_type_id changes"""
+    """Update ALL baseline and design upload records for the project when fields are edited"""
     item_data = item.model_dump(exclude_none=True)
     project_id = item_data.pop('project_id')
     
-    print(f"Updating both baseline and design for project {project_id} with data: {item_data}")
+    print(f"=== update_upload_record_baseline_and_design called ===")
+    print(f"Project ID: {project_id}")
+    print(f"Data to update: {item_data}")
+    print(f"User ID: {user_id}")
     
-    # Get the latest upload IDs for both baseline and design
-    def get_latest_upload_id_by_type(project_id, baseline_design):
+    # Get all upload IDs for both baseline and design (update all, not just latest)
+    def get_upload_ids_by_type(project_id, baseline_design):
         try:
+            print(f"  Searching for {baseline_design} uploads for project {project_id}")
             # First get all uploads for the project
             uploads_query = supabase.table('uploads')\
                 .select('id, created_at')\
                 .eq('project_id', project_id)\
                 .order('created_at', desc=True)
-            uploads_data, _ = uploads_query.execute()
+            uploads_response = uploads_query.execute()
             
-            if not uploads_data[1]:
-                print(f"No uploads found for project {project_id}")
-                return None
+            print(f"  Total uploads found: {len(uploads_response.data) if uploads_response.data else 0}")
             
+            if not uploads_response.data:
+                print(f"  No uploads found for project {project_id}")
+                return []
+            
+            upload_ids = []
             # For each upload, check if it has the corresponding baseline_design type
-            for upload in uploads_data[1]:
+            for upload in uploads_response.data:
                 upload_id = upload['id']
                 eeu_query = supabase.table('eeu_data')\
                     .select('baseline_design')\
                     .eq('upload_id', upload_id)\
                     .eq('baseline_design', baseline_design)\
                     .limit(1)
-                eeu_data, _ = eeu_query.execute()
+                eeu_response = eeu_query.execute()
                 
-                if eeu_data[1] and len(eeu_data[1]) > 0:
-                    print(f"Found {baseline_design} upload: {upload_id}")
-                    return upload_id
+                print(f"    Upload {upload_id}: EEU data for {baseline_design}? {bool(eeu_response.data and len(eeu_response.data) > 0)}")
+                
+                if eeu_response.data and len(eeu_response.data) > 0:
+                    upload_ids.append(upload_id)
             
-            print(f"No {baseline_design} upload found for project {project_id}")
-            return None
+            print(f"  Found {len(upload_ids)} {baseline_design} upload(s): {upload_ids}")
+            return upload_ids
             
         except Exception as e:
-            print(f"Error finding {baseline_design} upload: {e}")
-            return None
+            print(f"  ERROR finding {baseline_design} uploads: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
-    baseline_upload_id = get_latest_upload_id_by_type(project_id, 'baseline')
-    design_upload_id = get_latest_upload_id_by_type(project_id, 'design')
+    baseline_upload_ids = get_upload_ids_by_type(project_id, 'baseline')
+    design_upload_ids = get_upload_ids_by_type(project_id, 'design')
     
-    print(f"Baseline upload ID: {baseline_upload_id}, Design upload ID: {design_upload_id}")
+    print(f"Baseline upload IDs: {baseline_upload_ids}, Design upload IDs: {design_upload_ids}")
     
     success_count = 0
     total_attempts = 0
     
-    # Update baseline upload if it exists
-    if baseline_upload_id:
+    # Update all baseline uploads
+    for baseline_upload_id in baseline_upload_ids:
         total_attempts += 1
         try:
             # Retrieve current state
-            current_data, _ = supabase.table('uploads')\
+            current_data_response = supabase.table('uploads')\
                 .select('*')\
                 .eq('id', baseline_upload_id)\
                 .execute()
             
             # Update the record
-            data, count = supabase.table('uploads')\
+            update_response = supabase.table('uploads')\
                 .update(item_data)\
                 .eq('id', baseline_upload_id)\
                 .execute()
             
+            # Verify the update
+            verify_data_response = supabase.table('uploads')\
+                .select('project_construction_category_id, energy_code_id, updated_at')\
+                .eq('id', baseline_upload_id)\
+                .execute()
+            print(f"Verified baseline upload {baseline_upload_id} after update: {verify_data_response.data[0] if verify_data_response.data else 'No data'}")
+            
             # Log history
             try:
                 for key, value in item_data.items():
-                    previous_value = current_data[1][0].get(key)
+                    previous_value = current_data_response.data[0].get(key) if current_data_response.data else None
                     add_event_history('uploads', key, baseline_upload_id, value, user_id, previous_value)
             except Exception as e:
-                print("error logging history for baseline")
+                print(f"error logging history for baseline upload {baseline_upload_id}: {e}")
                 
             success_count += 1
             print(f"Successfully updated baseline upload {baseline_upload_id}")
             
         except Exception as e:
-            print(f"Error updating baseline upload: {e}")
+            print(f"Error updating baseline upload {baseline_upload_id}: {e}")
+            import traceback
+            traceback.print_exc()
     
-    # Update design upload if it exists
-    if design_upload_id:
+    # Update all design uploads
+    for design_upload_id in design_upload_ids:
         total_attempts += 1
         try:
             # Retrieve current state
-            current_data, _ = supabase.table('uploads')\
+            current_data_response = supabase.table('uploads')\
                 .select('*')\
                 .eq('id', design_upload_id)\
                 .execute()
             
             # Update the record
-            data, count = supabase.table('uploads')\
+            update_response = supabase.table('uploads')\
                 .update(item_data)\
                 .eq('id', design_upload_id)\
                 .execute()
             
+            # Verify the update
+            verify_data_response = supabase.table('uploads')\
+                .select('project_construction_category_id, energy_code_id, updated_at')\
+                .eq('id', design_upload_id)\
+                .execute()
+            print(f"Verified design upload {design_upload_id} after update: {verify_data_response.data[0] if verify_data_response.data else 'No data'}")
+            
             # Log history
             try:
                 for key, value in item_data.items():
-                    previous_value = current_data[1][0].get(key)
+                    previous_value = current_data_response.data[0].get(key) if current_data_response.data else None
                     add_event_history('uploads', key, design_upload_id, value, user_id, previous_value)
             except Exception as e:
-                print("error logging history for design")
+                print(f"error logging history for design upload {design_upload_id}: {e}")
                 
             success_count += 1
             print(f"Successfully updated design upload {design_upload_id}")
             
         except Exception as e:
-            print(f"Error updating design upload: {e}")
+            print(f"Error updating design upload {design_upload_id}: {e}")
+            import traceback
+            traceback.print_exc()
     
     print(f"Update results: {success_count}/{total_attempts} successful")
     
@@ -350,13 +431,13 @@ def update_upload_record(item,user_id):
     
     try:
         # Retrieve the current state of the record
-        current_data, _ = supabase.table('uploads')\
+        current_data_response = supabase.table('uploads')\
             .select('*')\
             .eq('id', upload_id)\
             .execute()
         
         # Update the record
-        data, count = supabase.table('uploads')\
+        update_response = supabase.table('uploads')\
             .update(item_data)\
             .eq('id', upload_id)\
             .execute()
@@ -364,7 +445,7 @@ def update_upload_record(item,user_id):
         try:
             for key, value in item_data.items():
                 # Get the previous value
-                previous_value = current_data[1][0].get(key)
+                previous_value = current_data_response.data[0].get(key) if current_data_response.data else None
                 add_event_history('uploads', key, upload_id, value, user_id, previous_value)
         except Exception as e:
             print("error logging history")
@@ -522,19 +603,46 @@ async def create_upload_file(item: models.UploadUpdate, authorized: Dict[str, Un
     user_id = authorized['user_id']
     print("here is the uploaded data", item)
     
-    # Check if this is a project_use_type_id update that should affect both baseline and design
     item_data = item.model_dump(exclude_none=True)
     print(f"Item data keys: {list(item_data.keys())}, length: {len(item_data)}")
-    print(f"Has project_use_type_id: {'project_use_type_id' in item_data}")
     
-    if 'project_use_type_id' in item_data and len(item_data) <= 3:  # project_id, user_id, project_use_type_id
-        print("Using baseline and design update function")
-        # Use the baseline and design update function
-        return update_upload_record_baseline_and_design(item, user_id)
-    else:
-        print("Using regular single upload update function")
-        # Use the regular single upload update function
-        return update_upload_record(item, user_id)
+    # Fields that need to update ALL baseline and design uploads (not just latest)
+    fields_requiring_all_uploads_update = [
+        'project_use_type_id',
+        'project_construction_category_id',
+        'energy_code_id',
+        'project_phase_id',
+        'year',
+        'reporting_year'
+    ]
+    
+    # Check if any of these fields are being updated
+    has_fields_for_all_uploads = any(field in item_data for field in fields_requiring_all_uploads_update)
+    
+    # If these fields are being updated, update all baseline and design uploads
+    if has_fields_for_all_uploads:
+        # Filter to only include fields that should update all uploads
+        fields_to_update = {k: v for k, v in item_data.items() if k in fields_requiring_all_uploads_update}
+        if len(fields_to_update) > 0:
+            # Create a new item with only the fields that need to update all uploads
+            # UploadUpdate model expects ints, which is what we're receiving
+            all_uploads_item = models.UploadUpdate(project_id=item_data['project_id'], **fields_to_update)
+            print(f"Using baseline and design update function for fields: {list(fields_to_update.keys())}")
+            result = update_upload_record_baseline_and_design(all_uploads_item, user_id)
+            
+            # If there are other fields that don't need all-uploads update, handle them separately
+            other_fields = {k: v for k, v in item_data.items() if k not in fields_requiring_all_uploads_update and k != 'project_id'}
+            if other_fields:
+                print(f"Also updating other fields with single upload: {list(other_fields.keys())}")
+                # Use regular update for other fields (like use_type_total_area, custom_project_id, etc.)
+                other_item = models.UploadUpdate(project_id=item_data['project_id'], **other_fields)
+                update_upload_record(other_item, user_id)
+            
+            return result
+    
+    print("Using regular single upload update function")
+    # Use the regular single upload update function
+    return update_upload_record(item, user_id)
 
 @router.post("/update_eeu_data/")
 async def create_upload_file(item: models.EEUUpdate, authorized: Dict[str, Union[bool, Optional[str]]] = Depends(verify_token)):

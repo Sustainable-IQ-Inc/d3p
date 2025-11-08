@@ -14,4 +14,7 @@ def pull_eeu_data(supabase, **kwargs):
         df = pd.DataFrame(data[1])
         return df
     else:
-        return "no results"
+        # Return empty DataFrame with expected columns to avoid errors
+        expected_columns = ['project_id', 'proj_name', 'id', 'climate_zone', 'project_use_type', 
+                           'company_id', 'project_phase', 'use_type_total_area', 'total_energy']
+        return pd.DataFrame(columns=expected_columns)

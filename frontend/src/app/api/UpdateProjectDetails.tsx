@@ -11,7 +11,7 @@ const submitUpload = async ({
   const { data: session } = await supabase.auth.getSession();
   try {
     const response = await axios.post(
-      `${process.env.NEXT_PUBLIC_API_BASE_URL}/update_upload/`,
+      `${process.env.NEXT_PUBLIC_API_BASE_URL}/update_project/`,
       {
         ...updateProps,
       },

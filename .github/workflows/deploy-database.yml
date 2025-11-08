@@ -40,10 +40,10 @@ jobs:
           ENVIRONMENT=${{ inputs.environment }}
           # Only staging seed file exists; use it for all environments
           echo "Downloading seed file (staging version used for all environments)..."
-          if gsutil cp gs://seed_files/seed.staging.sql supabase/seeds/seed.local.sql 2>/dev/null; then
+          if gsutil cp gs://d3p-seed-files/seed.staging.sql supabase/seeds/seed.local.sql 2>/dev/null; then
             echo "✅ Successfully downloaded seed file from GCS"
           else
-            echo "⚠️  Seed file not found in GCS bucket (gs://seed_files/seed.staging.sql)"
+            echo "⚠️  Seed file not found in GCS bucket (gs://d3p-seed-files/seed.staging.sql)"
             echo "⚠️  Deployment will continue using seed files from repository if available"
           fi
       

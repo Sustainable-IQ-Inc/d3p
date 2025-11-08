@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { notFound } from 'next/navigation';
+import { notFound, useRouter } from 'next/navigation';
 
 // material-ui
 import { Typography, Breadcrumbs, Link, Grid, Drawer, Button, Box } from "@mui/material";
@@ -21,6 +21,7 @@ import ShareToDDXModal from 'components/ShareToDDXModal';
 import { FetchDDXPreviewData } from 'app/api/ReturnDDXPreviewData';
 import { getDDXIntegrationStatus } from 'app/api/apiKeyService';
 import DDxShareButton from 'components/DDxShareButton';
+import ExportProjectsButton from 'components/ExportProjectsButton';
 import useUser from 'hooks/useUser';
 import { apiRequest } from 'utils/apiClient';
 
@@ -34,6 +35,7 @@ export type TableDataProps = {
 // ==============================|| DASHBOARD - DEFAULT ||============================== //
 
 const ProjectDetailView = ({ params }: { params: { id: string } }) => {
+  const router = useRouter();
   const { user } = useUser();
   const { reloadKey } = useDataReload();
   const [data, setData] = useState<any[]>([]);
@@ -342,6 +344,10 @@ const ProjectDetailView = ({ params }: { params: { id: string } }) => {
                 onClick={toggleShareModal}
                 eeuDataEditDetails={eeuDataEditDetails}
               />
+              <ExportProjectsButton
+                projectId={params.id}
+                measurementSystem="Imperial"
+              />
               {user.role === 'superadmin' && (
                 <Button
                   variant="outlined"
@@ -350,7 +356,7 @@ const ProjectDetailView = ({ params }: { params: { id: string } }) => {
                     if (!confirm('Delete this project and all related uploads/EEU data? This action cannot be undone.')) return;
                     try {
                       await apiRequest(`/projects/${params.id}/`, { method: 'DELETE' });
-                      window.location.href = 'http://localhost:8081/dashboard/default';
+                      router.push('/dashboard/default');
                     } catch (e) {
                       alert('Failed to delete project');
                     }

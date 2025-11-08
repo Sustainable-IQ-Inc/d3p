@@ -241,11 +241,11 @@ gcloud artifacts repositories create bem-reports \
    The deployment workflow can download an optional seed file from GCS to populate your database. This is especially useful for provisioning test or demo environments with example data, including test user login credentials and sample datasets, so that you can immediately log in as a demo user and view realistic data within d3p. 
    
    ```bash
-   # Create the seed_files bucket
-   gsutil mb gs://seed_files
+   # Create the d3p-seed-files bucket
+   gsutil mb gs://d3p-seed-files
    
    # Grant permissions to the deployment service account to read seed files
-   gsutil iam ch serviceAccount:bem-reports-deployer@$PROJECT_ID.iam.gserviceaccount.com:objectViewer gs://seed_files
+   gsutil iam ch serviceAccount:bem-reports-deployer@$PROJECT_ID.iam.gserviceaccount.com:objectViewer gs://d3p-seed-files
    ```
    
 5. **Upload your seed file** (optional):
@@ -254,11 +254,11 @@ gcloud artifacts repositories create bem-reports \
    
    ```bash
    # Upload your seed file to the bucket
-   gsutil cp path/to/seed.staging.sql gs://seed_files/seed.staging.sql
+   gsutil cp path/to/seed.staging.sql gs://d3p-seed-files/seed.staging.sql
    ```
    
    **Note**: 
-   - The deployment workflow will attempt to download `seed.staging.sql` from the `seed_files` bucket
+   - The deployment workflow will attempt to download `seed.staging.sql` from the `d3p-seed-files` bucket
    - If the file doesn't exist, the deployment will continue without it (the step is non-blocking)
    - The downloaded seed file will be saved as `backend/supabase/seeds/seed.local.sql` and used during database deployment
    - The seed file from GCS is used for both staging and production environments if provided

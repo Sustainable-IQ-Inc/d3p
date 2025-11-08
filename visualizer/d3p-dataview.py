@@ -123,6 +123,8 @@ if token:
             #this is the full set of projects
             print(st.session_state['units'])
             
+            df = df_pull_eeu_data  # Set df for Admin User case
+            user_company_id = None  # Set user_company_id for Admin User case
             companies = bv.generate_project_list(df_pull_eeu_data,list_type='companies')
 
                 
@@ -157,14 +159,25 @@ if token:
         gsf_ranges = bv.generate_project_list(df,list_type='gsf_range')
         #project_phases = bv.generate_project_list(df,list_type='project_phases')
 
+        # Ensure lists exist before inserting
+        if not isinstance(climate_zones, list):
+            climate_zones = []
+        if not isinstance(use_types, list):
+            use_types = []
         climate_zones.insert(0,"All")
         use_types.insert(0,"All")
 
         project_phases = bv.generate_project_list(df,list_type='project_phases',company_id=user_company_id)
+        if not isinstance(project_phases, list):
+            project_phases = []
         project_phases.insert(0,"All")
         gsf_ranges = bv.return_gsf_ranges()
         print(project_list)
-        project_list_use = project_list_names['proj_name'].tolist()
+        # Handle empty project_list_names DataFrame
+        if project_list_names.empty or 'proj_name' not in project_list_names.columns:
+            project_list_use = []
+        else:
+            project_list_use = project_list_names['proj_name'].tolist()
         empty_project_val="-- Select a Project --"
         project_list_use.insert(0,empty_project_val)
         anonomyze = True

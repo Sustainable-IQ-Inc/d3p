@@ -32,6 +32,42 @@ def generate_project_list(df,list_type,**kwargs):
     # list of columns to create lists for
     company_id = kwargs.get('company_id',None)
 
+    # Check if df is empty or doesn't have required columns
+    required_columns = ['project_id','proj_name','id','climate_zone','project_use_type','company_id','project_phase','use_type_total_area','total_energy']
+    
+    # Handle case where df is a string (legacy behavior) or empty
+    if isinstance(df, str) or df.empty:
+        # Return appropriate empty result based on list_type
+        if list_type == 'use_type':
+            return []
+        elif list_type == 'climate_zone':
+            return []
+        elif list_type == 'project_phases':
+            return []
+        elif list_type == 'projects':
+            return pd.DataFrame(columns=['project_id','proj_name','Company Name','total_energy','project_use_type','Use Type Area (SF)','Climate Zone','Project Phase'])
+        elif list_type == 'project_names':
+            return pd.DataFrame(columns=['proj_name'])
+        elif list_type == 'companies':
+            return []
+    
+    # Check if all required columns exist
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        # Return appropriate empty result based on list_type
+        if list_type == 'use_type':
+            return []
+        elif list_type == 'climate_zone':
+            return []
+        elif list_type == 'project_phases':
+            return []
+        elif list_type == 'projects':
+            return pd.DataFrame(columns=['project_id','proj_name','Company Name','total_energy','project_use_type','Use Type Area (SF)','Climate Zone','Project Phase'])
+        elif list_type == 'project_names':
+            return pd.DataFrame(columns=['proj_name'])
+        elif list_type == 'companies':
+            return []
+
     df_lists=df[['project_id','proj_name','id','climate_zone','project_use_type','company_id','project_phase','use_type_total_area','total_energy']]
     
     #convert use type column to string
@@ -119,6 +155,62 @@ def generate_compare_to_set(df,anonomyze,**kwargs):
     if(baseline_design is None):
         baseline_design = 'design'
 
+    # Handle empty DataFrame or string input
+    if isinstance(df, str) or (isinstance(df, pd.DataFrame) and df.empty):
+        # Return empty DataFrames with expected structure
+        # empty_full needs all columns that reformat_output_table expects (before reordering)
+        empty_full_cols = ['Heating_NaturalGas', 'Heating_DistrictHeating', 'Heating_Other',
+                          'Cooling_Electricity', 'Cooling_DistrictHeating', 'Cooling_Other',
+                          'DHW_Electricity', 'DHW_NaturalGas', 'DHW_DistrictHeating', 'DHW_Other',
+                          'Interior Lighting_Electricity', 'Exterior Lighting_Electricity',
+                          'Plug Loads_Electricity', 'Fans_Electricity', 'Pumps_Electricity',
+                          'Pumps_NaturalGas', 'Process Refrigeration_Electricity',
+                          'ExteriorUsage_Electricity', 'ExteriorUsage_NaturalGas',
+                          'OtherEndUse_Electricity', 'OtherEndUse_NaturalGas',
+                          'OtherEndUse_Other', 'Heat Rejection_Electricity',
+                          'Humidification_Electricity', 'HeatRecovery_Electricity',
+                          'HeatRecovery_Other', 'SolarDHW_On-SiteRenewables',
+                          'SolarPV_On-SiteRenewables', 'Wind_On-SiteRenewables',
+                          'Other_On-SiteRenewables', 'total_Electricity', 'total_NaturalGas',
+                          'total_DistrictHeating', 'total_Other', 'total_On-SiteRenewables',
+                          'use_type_total_area', 'report_type', 'project_name', 'area_units',
+                          'energy_units', 'baseline_design', 'weather_string',
+                          'climate_zone', 'Heating_Electricity', 'weather_station',
+                          'total_energy', 'id', 'project_id', 'project_use_type', 'project_phase',
+                          'company_id', 'pct_total_area', 'legend_val', 'proj_name', 'project_id_combined_hashed']
+        empty_compare = pd.DataFrame(columns=['eeu', 'value', 'project_name'])
+        empty_full = pd.DataFrame(columns=empty_full_cols)
+        return [empty_compare, empty_full]
+
+    # Check if required columns exist
+    required_cols_for_compare = ['baseline_design', 'project_id', 'climate_zone', 'project_use_type', 'company_id', 'project_phase']
+    missing_cols = [col for col in required_cols_for_compare if col not in df.columns]
+    if missing_cols:
+        # Return empty DataFrames with expected structure
+        # empty_full needs all columns that reformat_output_table expects (before reordering)
+        empty_full_cols = ['Heating_NaturalGas', 'Heating_DistrictHeating', 'Heating_Other',
+                          'Cooling_Electricity', 'Cooling_DistrictHeating', 'Cooling_Other',
+                          'DHW_Electricity', 'DHW_NaturalGas', 'DHW_DistrictHeating', 'DHW_Other',
+                          'Interior Lighting_Electricity', 'Exterior Lighting_Electricity',
+                          'Plug Loads_Electricity', 'Fans_Electricity', 'Pumps_Electricity',
+                          'Pumps_NaturalGas', 'Process Refrigeration_Electricity',
+                          'ExteriorUsage_Electricity', 'ExteriorUsage_NaturalGas',
+                          'OtherEndUse_Electricity', 'OtherEndUse_NaturalGas',
+                          'OtherEndUse_Other', 'Heat Rejection_Electricity',
+                          'Humidification_Electricity', 'HeatRecovery_Electricity',
+                          'HeatRecovery_Other', 'SolarDHW_On-SiteRenewables',
+                          'SolarPV_On-SiteRenewables', 'Wind_On-SiteRenewables',
+                          'Other_On-SiteRenewables', 'total_Electricity', 'total_NaturalGas',
+                          'total_DistrictHeating', 'total_Other', 'total_On-SiteRenewables',
+                          'use_type_total_area', 'report_type', 'project_name', 'area_units',
+                          'energy_units', 'baseline_design', 'weather_string',
+                          'climate_zone', 'Heating_Electricity', 'weather_station',
+                          'total_energy', 'id', 'project_id', 'project_use_type', 'project_phase',
+                          'company_id', 'pct_total_area', 'legend_val', 'proj_name', 'project_id_combined_hashed']
+        empty_compare = pd.DataFrame(columns=['eeu', 'value', 'project_name'])
+        empty_full = pd.DataFrame(columns=empty_full_cols)
+        return [empty_compare, empty_full]
+
     df_compare_to_set = df.copy()
     df_compare_to_set = df_compare_to_set[df_compare_to_set['baseline_design']==baseline_design]
 
@@ -161,6 +253,32 @@ def generate_compare_to_set(df,anonomyze,**kwargs):
         # Drop duplicates and reset index
         df_compare_to_set = filtered_df
 
+    # Check if DataFrame is empty after all filtering
+    if df_compare_to_set.empty:
+        # Return empty DataFrames with expected structure
+        # empty_full needs all columns that reformat_output_table expects (before reordering)
+        empty_full_cols = ['Heating_NaturalGas', 'Heating_DistrictHeating', 'Heating_Other',
+                          'Cooling_Electricity', 'Cooling_DistrictHeating', 'Cooling_Other',
+                          'DHW_Electricity', 'DHW_NaturalGas', 'DHW_DistrictHeating', 'DHW_Other',
+                          'Interior Lighting_Electricity', 'Exterior Lighting_Electricity',
+                          'Plug Loads_Electricity', 'Fans_Electricity', 'Pumps_Electricity',
+                          'Pumps_NaturalGas', 'Process Refrigeration_Electricity',
+                          'ExteriorUsage_Electricity', 'ExteriorUsage_NaturalGas',
+                          'OtherEndUse_Electricity', 'OtherEndUse_NaturalGas',
+                          'OtherEndUse_Other', 'Heat Rejection_Electricity',
+                          'Humidification_Electricity', 'HeatRecovery_Electricity',
+                          'HeatRecovery_Other', 'SolarDHW_On-SiteRenewables',
+                          'SolarPV_On-SiteRenewables', 'Wind_On-SiteRenewables',
+                          'Other_On-SiteRenewables', 'total_Electricity', 'total_NaturalGas',
+                          'total_DistrictHeating', 'total_Other', 'total_On-SiteRenewables',
+                          'use_type_total_area', 'report_type', 'project_name', 'area_units',
+                          'energy_units', 'baseline_design', 'weather_string',
+                          'climate_zone', 'Heating_Electricity', 'weather_station',
+                          'total_energy', 'id', 'project_id', 'project_use_type', 'project_phase',
+                          'company_id', 'pct_total_area', 'legend_val', 'proj_name', 'project_id_combined_hashed']
+        empty_compare = pd.DataFrame(columns=['eeu', 'value', 'project_name'])
+        empty_full = pd.DataFrame(columns=empty_full_cols)
+        return [empty_compare, empty_full]
 
     df_compare_to_set[cols] = df_compare_to_set[cols].apply(pd.to_numeric, errors='ignore', downcast='float')
     df_compare_to_set_full = df_compare_to_set.copy()
@@ -212,6 +330,21 @@ def generate_compare_to_set(df,anonomyze,**kwargs):
 
 def generate_selected_project(df,selected_project,company_id,baseline_design,**kwargs):
     energy_units = kwargs.get('energy_units',None)
+    
+    # Handle empty DataFrame or string input
+    if isinstance(df, str) or (isinstance(df, pd.DataFrame) and df.empty):
+        # Return empty DataFrame with expected structure
+        empty_df = pd.DataFrame(columns=['eeu', 'value', 'project_name'])
+        return empty_df
+    
+    # Check if required columns exist
+    required_cols = ['company_id', 'proj_name', 'baseline_design'] + cols
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        # Return empty DataFrame with expected structure
+        empty_df = pd.DataFrame(columns=['eeu', 'value', 'project_name'])
+        return empty_df
+    
     df[cols] = df[cols].apply(pd.to_numeric, errors='ignore', downcast='float')
     df_selected_project = df.loc[df['company_id']==company_id]
     df_selected_project = df.loc[df['proj_name']==selected_project]
@@ -261,11 +394,21 @@ def return_metric(metric_name,set_name,**kwargs):
     if(metric_name=='gsf'):
         if(set_name=="compare_to"):
             ##
-            gsf = float(df_compare_to_set.loc[df_compare_to_set['eeu'] == 'use_type_total_area', 'value'].iloc[0])
+            if df_compare_to_set is None or (isinstance(df_compare_to_set, pd.DataFrame) and df_compare_to_set.empty):
+                return 0 if format=="int" else "0 SF"
+            filtered = df_compare_to_set.loc[df_compare_to_set['eeu'] == 'use_type_total_area', 'value']
+            if filtered.empty:
+                return 0 if format=="int" else "0 SF"
+            gsf = float(filtered.iloc[0])
             
         elif(set_name=="selected_project"):
             #gsf=df_selected_project['use_type_total_area'].iloc[-1]
-            gsf = float(df_selected_project.loc[df_selected_project['eeu'] == 'use_type_total_area', 'value'].iloc[0])
+            if df_selected_project is None or (isinstance(df_selected_project, pd.DataFrame) and df_selected_project.empty):
+                return 0 if format=="int" else "0 SF"
+            filtered = df_selected_project.loc[df_selected_project['eeu'] == 'use_type_total_area', 'value']
+            if filtered.empty:
+                return 0 if format=="int" else "0 SF"
+            gsf = float(filtered.iloc[0])
             
         #round to 0 decimals
         gsf = round(gsf,0)
@@ -278,9 +421,19 @@ def return_metric(metric_name,set_name,**kwargs):
             return gsf
     if(metric_name=='eui'):
         if(set_name=="compare_to"):
-            eui = float(df_compare_to_set.loc[df_compare_to_set['eeu'] == 'total_energy', 'value'].iloc[0])
+            if df_compare_to_set is None or (isinstance(df_compare_to_set, pd.DataFrame) and df_compare_to_set.empty):
+                return 0 if format=="int" else "0 " + (energy_units if energy_units else "")
+            filtered = df_compare_to_set.loc[df_compare_to_set['eeu'] == 'total_energy', 'value']
+            if filtered.empty:
+                return 0 if format=="int" else "0 " + (energy_units if energy_units else "")
+            eui = float(filtered.iloc[0])
         elif(set_name=="selected_project"): 
-            eui = float(df_selected_project.loc[df_selected_project['eeu'] == 'total_energy', 'value'].iloc[0])
+            if df_selected_project is None or (isinstance(df_selected_project, pd.DataFrame) and df_selected_project.empty):
+                return 0 if format=="int" else "0 " + (energy_units if energy_units else "")
+            filtered = df_selected_project.loc[df_selected_project['eeu'] == 'total_energy', 'value']
+            if filtered.empty:
+                return 0 if format=="int" else "0 " + (energy_units if energy_units else "")
+            eui = float(filtered.iloc[0])
         eui = round(eui,0)
         if(format=="int"):
             return eui
@@ -295,27 +448,78 @@ def return_metric(metric_name,set_name,**kwargs):
     if(metric_name=='climate_zone'):
         #select 
         try:
-            climate_zone = project_list.loc[project_list['proj_name'] == selected_project].iloc[0,project_list.columns.get_loc('Climate Zone')]
+            if project_list is None or project_list.empty:
+                return 'Unknown'
+            filtered = project_list.loc[project_list['proj_name'] == selected_project]
+            if filtered.empty:
+                return 'Unknown'
+            climate_zone = filtered.iloc[0,project_list.columns.get_loc('Climate Zone')]
         except:
             climate_zone = 'Unknown'
         return climate_zone
     if(metric_name=='use_type'):
         #select 
-        use_type = project_list.loc[project_list['proj_name'] == selected_project].iloc[0,project_list.columns.get_loc('project_use_type')]
-
+        try:
+            if project_list is None or project_list.empty:
+                return '--'
+            filtered = project_list.loc[project_list['proj_name'] == selected_project]
+            if filtered.empty:
+                return '--'
+            use_type = filtered.iloc[0,project_list.columns.get_loc('project_use_type')]
+        except:
+            use_type = '--'
         return use_type
     if(metric_name=='area'):
         #select 
-        area = project_list.loc[project_list['proj_name'] == selected_project].iloc[0,project_list.columns.get_loc('Use Type Area (SF)')]
-
+        try:
+            if project_list is None or project_list.empty:
+                return '--'
+            filtered = project_list.loc[project_list['proj_name'] == selected_project]
+            if filtered.empty:
+                return '--'
+            area = filtered.iloc[0,project_list.columns.get_loc('Use Type Area (SF)')]
+        except:
+            area = '--'
         return area
     if(metric_name=='project_company'):
         #select 
-        project_company = project_list.loc[project_list['proj_name'] == selected_project].iloc[0,project_list.columns.get_loc('Company Name')]
-
+        try:
+            if project_list is None or project_list.empty:
+                return '--'
+            filtered = project_list.loc[project_list['proj_name'] == selected_project]
+            if filtered.empty:
+                return '--'
+            project_company = filtered.iloc[0,project_list.columns.get_loc('Company Name')]
+        except:
+            project_company = '--'
         return project_company
     
 def reformat_output_table(df):
+    # Handle empty DataFrame
+    if df.empty:
+        # Return empty DataFrame with expected columns in the right order
+        cols = ['project_id', 'company_id', 'energy_units', 'total_energy',
+                'Heating_NaturalGas', 'Heating_DistrictHeating', 'Heating_Other',
+                'Cooling_Electricity', 'Cooling_DistrictHeating', 'Cooling_Other',
+                'DHW_Electricity', 'DHW_NaturalGas', 'DHW_DistrictHeating', 'DHW_Other',
+                'Interior Lighting_Electricity', 'Exterior Lighting_Electricity',
+                'Plug Loads_Electricity', 'Fans_Electricity', 'Pumps_Electricity',
+                'Pumps_NaturalGas', 'Process Refrigeration_Electricity',
+                'ExteriorUsage_Electricity', 'ExteriorUsage_NaturalGas',
+                'OtherEndUse_Electricity', 'OtherEndUse_NaturalGas',
+                'OtherEndUse_Other', 'Heat Rejection_Electricity',
+                'Humidification_Electricity', 'HeatRecovery_Electricity',
+                'HeatRecovery_Other', 'SolarDHW_On-SiteRenewables',
+                'SolarPV_On-SiteRenewables', 'Wind_On-SiteRenewables',
+                'Other_On-SiteRenewables', 'total_Electricity', 'total_NaturalGas',
+                'total_DistrictHeating', 'total_Other', 'total_On-SiteRenewables',
+                'use_type_total_area', 'report_type', 'area_units',
+                'baseline_design', 'weather_string',
+                'climate_zone', 'Heating_Electricity', 'weather_station',
+                'id', 'project_use_type', 'project_phase',
+                'pct_total_area','legend_val','proj_name']
+        return pd.DataFrame(columns=cols)
+    
     cols = ['Heating_NaturalGas', 'Heating_DistrictHeating', 'Heating_Other',
     'Cooling_Electricity', 'Cooling_DistrictHeating', 'Cooling_Other',
     'DHW_Electricity', 'DHW_NaturalGas', 'DHW_DistrictHeating', 'DHW_Other',
@@ -336,6 +540,15 @@ def reformat_output_table(df):
     'total_energy', 'id',
     'project_id', 'project_use_type', 'project_phase',
     'company_id','pct_total_area','legend_val','proj_name']
+    
+    # Check which columns exist in the DataFrame
+    existing_cols = [col for col in cols if col in df.columns]
+    missing_cols = [col for col in cols if col not in df.columns]
+    
+    # If there are missing columns, add them as empty columns
+    if missing_cols:
+        for col in missing_cols:
+            df[col] = None
     
     cols.insert(0, cols.pop(cols.index('project_id')))
     cols.insert(1, cols.pop(cols.index('company_id')))

@@ -24,6 +24,7 @@ import useUser from "hooks/useUser";
 import UnitSelector from "components/UnitSelector";
 import CompanyDropdown from "components/CompanySelector";
 import {  useDataReload } from "contexts/ProjectDataReload";
+import ExportProjectsButton from "components/ExportProjectsButton";
 
 // assets
 
@@ -42,6 +43,7 @@ const DashboardDefault = () => {
   const { user } = useUser();
   const [isLoading, setIsLoading] = useState(true);
   const [data, setData] = useState<TableDataProps[]>([]);
+  const [searchTerm, setSearchTerm] = useState<string>('');
   const { reloadData } = useDataReload();
   const [measurementSystem, setMeasurementSystem] = useState("Imperial");
   const [companyView, setCompanyView] = useState(user.companyId);
@@ -188,10 +190,17 @@ const DashboardDefault = () => {
           <Grid container alignItems="center" justifyContent="space-between">
             <Grid item />
             <Grid item>
-              <UnitSelector
-                measurementSystem={measurementSystem}
-                setMeasurementSystem={setMeasurementSystem}
-              />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <UnitSelector
+                  measurementSystem={measurementSystem}
+                  setMeasurementSystem={setMeasurementSystem}
+                />
+                <ExportProjectsButton
+                  companyId={companyView}
+                  measurementSystem={measurementSystem}
+                  searchTerm={searchTerm}
+                />
+              </Box>
             </Grid>
           </Grid>
           <MainCard sx={{ mt: 2, width: "100%" }} content={false}>
@@ -233,6 +242,7 @@ const DashboardDefault = () => {
                 columnsNew={columns}
                 pagination={"bottom"}
                 title={"Projects"}
+                onSearchChange={setSearchTerm}
               />
             )}
           </MainCard>
