@@ -214,6 +214,9 @@ case $choice in
         prod_bucket_name=$(prompt_for_value "Production GCS Bucket Name")
         set_secret "PROD_BUCKET_NAME" "$prod_bucket_name"
         
+        prod_project_id=$(prompt_for_value "Production Supabase Project ID")
+        set_secret "PROD_SUPABASE_PROJECT_ID" "$prod_project_id"
+        
         prod_access_token=$(prompt_for_value "Production Supabase Access Token")
         set_secret "PROD_SUPABASE_ACCESS_TOKEN" "$prod_access_token"
         
@@ -310,6 +313,9 @@ case $choice in
         prod_bucket_name=$(prompt_for_value "Production GCS Bucket Name")
         set_secret "PROD_BUCKET_NAME" "$prod_bucket_name"
         
+        prod_project_id=$(prompt_for_value "Production Supabase Project ID")
+        set_secret "PROD_SUPABASE_PROJECT_ID" "$prod_project_id"
+        
         prod_access_token=$(prompt_for_value "Production Supabase Access Token")
         set_secret "PROD_SUPABASE_ACCESS_TOKEN" "$prod_access_token"
         
@@ -356,6 +362,7 @@ case $choice in
         [ -n "$PROD_ENCRYPTION_KEY" ] && set_secret "PROD_ENCRYPTION_KEY" "$PROD_ENCRYPTION_KEY"
         [ -n "$PROD_ENCRYPTION_SALT" ] && set_secret "PROD_ENCRYPTION_SALT" "$PROD_ENCRYPTION_SALT"
         [ -n "$PROD_BUCKET_NAME" ] && set_secret "PROD_BUCKET_NAME" "$PROD_BUCKET_NAME"
+        [ -n "$PROD_SUPABASE_PROJECT_ID" ] && set_secret "PROD_SUPABASE_PROJECT_ID" "$PROD_SUPABASE_PROJECT_ID"
         [ -n "$PROD_SUPABASE_ACCESS_TOKEN" ] && set_secret "PROD_SUPABASE_ACCESS_TOKEN" "$PROD_SUPABASE_ACCESS_TOKEN"
         [ -n "$PROD_SUPABASE_DB_PASSWORD" ] && set_secret "PROD_SUPABASE_DB_PASSWORD" "$PROD_SUPABASE_DB_PASSWORD"
         [ -n "$PROD_DDX_API_BASE_URL" ] && set_secret "PROD_DDX_API_BASE_URL" "$PROD_DDX_API_BASE_URL"
