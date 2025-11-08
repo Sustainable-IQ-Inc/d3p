@@ -136,8 +136,8 @@ if token:
                 st.session_state['view_all_projects'] = True
                 df = df_pull_eeu_data = pull_eeu_data(supabase)
                 user_company_id=None
-            if st.session_state['view_all_projects'] != True:
-                
+            else:
+                st.session_state['view_all_projects'] = False
                 ##TO DO - need to add company filter
                 user_company_id = data.user.user_metadata['company_id']
                 print("user_company_id"+user_company_id)
