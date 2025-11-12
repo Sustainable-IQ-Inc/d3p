@@ -1,6 +1,13 @@
 /** @type {import('next').NextConfig} */
 
-module.exports = {
+const withNextra = require('nextra')({
+  latex: true,
+  search: {
+    codeblocks: false
+  }
+})
+
+module.exports = withNextra({
   output: 'standalone',
   modularizeImports: {
     '@mui/material': {
@@ -27,4 +34,4 @@ module.exports = {
     REDIRECT_URL: process.env.REDIRECT_URL,
     ALLOW_ORIGIN_URL: process.env.ALLOW_ORIGIN_URL,
   }
-};
+});
