@@ -7,7 +7,17 @@ export async function GET(req: NextRequest){
 
     console.log('=== CALLBACK ROUTE DEBUG ===');
     console.log('URL:', url.href);
+    console.log('url.origin:', url.origin);
+    console.log('Host header:', req.headers.get('host'));
+    console.log('X-Forwarded-Host:', req.headers.get('x-forwarded-host'));
+    console.log('X-Forwarded-Proto:', req.headers.get('x-forwarded-proto'));
     console.log('Query params:', Object.fromEntries(url.searchParams));
+
+    // Get the correct origin from headers (Cloud Run uses X-Forwarded-Host)
+    const forwardedHost = req.headers.get('x-forwarded-host');
+    const forwardedProto = req.headers.get('x-forwarded-proto') || 'https';
+    const correctOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : url.origin;
+    console.log('Correct origin for redirects:', correctOrigin);
 
     const code = url.searchParams.get('code')
     const error = url.searchParams.get('error')
@@ -28,9 +38,7 @@ export async function GET(req: NextRequest){
         
         const encodedMessage = encodeURIComponent(message);
         console.log('Redirecting to login with error:', message);
-        
-        // Use url.origin directly - we're already on the frontend
-        return NextResponse.redirect(`${url.origin}/login?error=auth_failed&message=${encodedMessage}`);
+        return NextResponse.redirect(`${correctOrigin}/login?error=auth_failed&message=${encodedMessage}`);
     }
 
     if(code){
@@ -55,25 +63,25 @@ export async function GET(req: NextRequest){
             if (exchangeError) {
                 console.error('Error exchanging code for session:', exchangeError);
                 const message = encodeURIComponent(exchangeError.message);
-                return NextResponse.redirect(`${url.origin}/login?error=auth_failed&message=${message}`);
+                return NextResponse.redirect(`${correctOrigin}/login?error=auth_failed&message=${message}`);
             }
             
             if (data?.session) {
                 console.log('✓ Successfully authenticated:', data.session.user.email);
-                return NextResponse.redirect(`${url.origin}/dashboard/default`);
+                return NextResponse.redirect(`${correctOrigin}/dashboard/default`);
             } else {
                 console.error('No session returned from exchange');
-                return NextResponse.redirect(`${url.origin}/login?error=auth_failed&message=${encodeURIComponent('No session established from magic link')}`);
+                return NextResponse.redirect(`${correctOrigin}/login?error=auth_failed&message=${encodeURIComponent('No session established from magic link')}`);
             }
         } catch (err) {
             console.error('Unexpected error during code exchange:', err);
             const message = encodeURIComponent((err as Error)?.message || 'Unexpected authentication error');
-            return NextResponse.redirect(`${url.origin}/login?error=auth_failed&message=${message}`);
+            return NextResponse.redirect(`${correctOrigin}/login?error=auth_failed&message=${message}`);
         }
     }
 
     // No code provided, redirect to login
     console.log('No code in URL, redirecting to login');
-    return NextResponse.redirect(`${url.origin}/login`)
+    return NextResponse.redirect(`${correctOrigin}/login`)
 
 }
