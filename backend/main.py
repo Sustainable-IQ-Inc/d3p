@@ -4,7 +4,7 @@ import os
 from supabase import create_client, Client
 from fastapi import HTTPException
 from fastapi.security import HTTPBearer
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
 import secrets
 import io
 from datetime import datetime
@@ -39,6 +39,43 @@ security = HTTPBearer()
 @app.get("/wake-up/")
 async def submit_project(authorized: Dict[str, Union[bool, Optional[str]]] = Depends(verify_token)):
     return "success"
+
+# Redirect routes for old magic links that point to backend instead of frontend
+@app.get("/callback")
+async def redirect_callback_to_frontend(request: Request):
+    """
+    Redirect old magic links that point to backend /callback to the frontend.
+    This handles old magic login links that were created with the wrong emailRedirectTo URL.
+    """
+    # Get the frontend URL from environment variable
+    frontend_url = os.getenv('REDIRECT_URL', 'http://localhost:8081')
+    
+    # Preserve all query parameters and hash fragments
+    query_string = str(request.query_params)
+    redirect_url = f"{frontend_url}/callback"
+    if query_string:
+        redirect_url += f"?{query_string}"
+    
+    print(f"Redirecting backend /callback to frontend: {redirect_url}")
+    return RedirectResponse(url=redirect_url, status_code=307)
+
+@app.get("/login")
+async def redirect_login_to_frontend(request: Request):
+    """
+    Redirect login requests to the frontend.
+    This handles old magic links that might redirect to backend /login.
+    """
+    # Get the frontend URL from environment variable
+    frontend_url = os.getenv('REDIRECT_URL', 'http://localhost:8081')
+    
+    # Preserve all query parameters
+    query_string = str(request.query_params)
+    redirect_url = f"{frontend_url}/login"
+    if query_string:
+        redirect_url += f"?{query_string}"
+    
+    print(f"Redirecting backend /login to frontend: {redirect_url}")
+    return RedirectResponse(url=redirect_url, status_code=307)
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
