@@ -23,11 +23,13 @@ export async function GET(req: NextRequest){
         
         // Customize message for common errors
         if (errorCode === 'otp_expired' || error === 'access_denied') {
-            message = 'This magic link has expired or has already been used. Please request a new one.';
+            message = 'This magic link has expired or has already been used. Please request a new one by entering your email address below.';
         }
         
         const encodedMessage = encodeURIComponent(message);
         console.log('Redirecting to login with error:', message);
+        
+        // Use url.origin directly - we're already on the frontend
         return NextResponse.redirect(`${url.origin}/login?error=auth_failed&message=${encodedMessage}`);
     }
 
