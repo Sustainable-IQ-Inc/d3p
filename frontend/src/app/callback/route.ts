@@ -5,19 +5,10 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(req: NextRequest){
     const url = new URL(req.url)
 
-    console.log('=== CALLBACK ROUTE DEBUG ===');
-    console.log('URL:', url.href);
-    console.log('url.origin:', url.origin);
-    console.log('Host header:', req.headers.get('host'));
-    console.log('X-Forwarded-Host:', req.headers.get('x-forwarded-host'));
-    console.log('X-Forwarded-Proto:', req.headers.get('x-forwarded-proto'));
-    console.log('Query params:', Object.fromEntries(url.searchParams));
-
     // Get the correct origin from headers (Cloud Run uses X-Forwarded-Host)
     const forwardedHost = req.headers.get('x-forwarded-host');
     const forwardedProto = req.headers.get('x-forwarded-proto') || 'https';
     const correctOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : url.origin;
-    console.log('Correct origin for redirects:', correctOrigin);
 
     const code = url.searchParams.get('code')
     const error = url.searchParams.get('error')
@@ -26,8 +17,6 @@ export async function GET(req: NextRequest){
 
     // Check for errors from Supabase (expired links, etc.)
     if (error) {
-        console.error('Auth callback error:', { error, errorCode, errorDescription });
-        
         // Create user-friendly error message
         let message = errorDescription || error;
         
@@ -37,12 +26,10 @@ export async function GET(req: NextRequest){
         }
         
         const encodedMessage = encodeURIComponent(message);
-        console.log('Redirecting to login with error:', message);
         return NextResponse.redirect(`${correctOrigin}/login?error=auth_failed&message=${encodedMessage}`);
     }
 
     if(code){
-        console.log('Code found, attempting exchange...');
         const cookieStore = await cookies();
 
         const supabase = createRouteHandlerClient({
@@ -54,12 +41,6 @@ export async function GET(req: NextRequest){
                 .auth
                 .exchangeCodeForSession(code)
             
-            console.log('Exchange result:', { 
-                hasSession: !!data?.session, 
-                hasError: !!exchangeError,
-                errorMessage: exchangeError?.message 
-            });
-            
             if (exchangeError) {
                 console.error('Error exchanging code for session:', exchangeError);
                 const message = encodeURIComponent(exchangeError.message);
@@ -67,10 +48,8 @@ export async function GET(req: NextRequest){
             }
             
             if (data?.session) {
-                console.log('✓ Successfully authenticated:', data.session.user.email);
                 return NextResponse.redirect(`${correctOrigin}/dashboard/default`);
             } else {
-                console.error('No session returned from exchange');
                 return NextResponse.redirect(`${correctOrigin}/login?error=auth_failed&message=${encodeURIComponent('No session established from magic link')}`);
             }
         } catch (err) {
@@ -81,7 +60,6 @@ export async function GET(req: NextRequest){
     }
 
     // No code provided, redirect to login
-    console.log('No code in URL, redirecting to login');
     return NextResponse.redirect(`${correctOrigin}/login`)
 
 }
