@@ -119,11 +119,50 @@ const AuthLogin = () => {
     const checkAuth = async () => {
       // Only check for existing session if NOT from expired link or auth failed
       if (!showExpiredLinkMessage && !authFailedMessage) {
-        const { data } = await supabase.auth.getUser();
-        if (data.user) {
-          console.log('User already logged in, redirecting...');
-          router.push("/dashboard/default");
-          router.refresh();
+        try {
+          // First check if we have a session before trying to get user
+          const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+          
+          if (sessionError) {
+            console.warn('Error getting session on login page:', sessionError);
+            // Log the error for debugging
+            logAuthEvent({
+              event_type: 'magic_link_error',
+              error_message: `Session check error: ${sessionError.message}`,
+            });
+            return;
+          }
+          
+          // Only try to get user if we have a valid session
+          if (sessionData?.session) {
+            const { data, error: userError } = await supabase.auth.getUser();
+            
+            if (userError) {
+              console.warn('Error getting user on login page:', userError);
+              // If token is invalid, sign out to clean up
+              if (userError.message?.includes('invalid claim') || userError.message?.includes('JWT')) {
+                console.log('Invalid token detected, signing out...');
+                await supabase.auth.signOut();
+                logAuthEvent({
+                  event_type: 'magic_link_error',
+                  error_message: `Invalid token on login page: ${userError.message}`,
+                });
+              }
+              return;
+            }
+            
+            if (data.user) {
+              console.log('User already logged in, redirecting...');
+              router.push("/dashboard/default");
+              router.refresh();
+            }
+          }
+        } catch (error) {
+          console.error('Unexpected error checking auth on login page:', error);
+          logAuthEvent({
+            event_type: 'magic_link_error',
+            error_message: `Unexpected auth check error: ${(error as Error)?.message || 'Unknown error'}`,
+          });
         }
       }
     };
@@ -132,8 +171,18 @@ const AuthLogin = () => {
 
     // Set up the listener for future auth state changes (like after successful login)
     const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         console.log('Auth state change:', event, 'has session:', !!session);
+        
+        // Handle TOKEN_REFRESHED event with error
+        if (event === "TOKEN_REFRESHED" && !session) {
+          console.warn('Token refresh failed, no session available');
+          logAuthEvent({
+            event_type: 'magic_link_error',
+            error_message: 'Token refresh failed - no session',
+          });
+          return;
+        }
         
         // SIGNED_IN event means user just logged in successfully - always redirect
         if (event === "SIGNED_IN" && session) {
@@ -146,6 +195,10 @@ const AuthLogin = () => {
           console.log('Initial session found, redirecting to dashboard...');
           router.push("/dashboard/default");
           router.refresh();
+        }
+        // Handle sign out events
+        else if (event === "SIGNED_OUT") {
+          console.log('User signed out');
         }
       }
     );

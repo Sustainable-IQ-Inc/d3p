@@ -28,19 +28,35 @@ async function logAuthEvent(data: {
     ip_address?: string;
     error_message?: string;
 }) {
+    // ALWAYS log to console first (shows up in Cloud Run logs for frontend)
+    const logPrefix = data.event_type === 'magic_link_accessed' ? '🔗' : 
+                      data.event_type === 'magic_link_error' ? '❌' : '📧';
+    console.log(`${logPrefix} AUTH EVENT [${data.event_type}]:`, JSON.stringify(data, null, 2));
+    
     try {
+        // Also try to send to backend logging endpoint
         // Use NEXT_PUBLIC_API_BASE_URL if available, otherwise fall back to localhost
-        const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
-        await fetch(`${apiUrl}/log-auth-event/`, {
+        const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_URL || 'http://localhost:8000';
+        
+        console.log(`Attempting to log to backend: ${apiUrl}/log-auth-event/`);
+        
+        const response = await fetch(`${apiUrl}/log-auth-event/`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(data),
         });
+        
+        if (!response.ok) {
+            console.error(`Backend logging failed with status ${response.status}`);
+        } else {
+            console.log('Successfully logged to backend');
+        }
     } catch (error) {
-        // Silently fail - we don't want logging to break the auth flow
-        console.error('Failed to log auth event:', error);
+        // Log the error but don't break the auth flow
+        console.error('Failed to send log to backend:', error);
+        console.error('API URL attempted:', process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_URL || 'http://localhost:8000');
     }
 }
 
@@ -111,6 +127,9 @@ export async function GET(req: NextRequest){
             
             if (data?.session) {
                 // Log successful magic link access
+                // This will appear in FRONTEND (Next.js) logs, not backend logs!
+                console.log(`🔗 MAGIC LINK ACCESSED - User: ${data.session.user.id}, IP: ${clientIp}, URL: ${url.toString()}`);
+                
                 await logAuthEvent({
                     event_type: 'magic_link_accessed',
                     user_id: data.session.user.id,
@@ -118,7 +137,6 @@ export async function GET(req: NextRequest){
                     ip_address: clientIp,
                 });
                 
-                console.log(`Magic link successfully accessed by user ${data.session.user.id} from IP ${clientIp}`);
                 return NextResponse.redirect(`${correctOrigin}/dashboard/default`);
             } else {
                 // Log the error

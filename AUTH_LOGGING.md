@@ -118,42 +118,63 @@ Logs when a magic link is clicked and processed. This includes:
 
 ### Google Cloud Logging
 
-All logs are sent to Google Cloud Logging and can be viewed in the Google Cloud Console:
+All logs are sent to Google Cloud Logging and can be viewed in the Google Cloud Console.
+
+**IMPORTANT:** Different events log to different services:
+- **Login Page Visits** → Backend logs (Python/FastAPI)
+- **Magic Link Sent** → Backend logs (Python/FastAPI)  
+- **Magic Link Accessed** → **Frontend logs (Next.js/Node)** ⚠️
+- **Magic Link Errors** → Both Frontend and Backend logs
+
+#### Finding Logs in Google Cloud Console
 
 1. Go to Google Cloud Console
 2. Navigate to "Logging" → "Logs Explorer"
 3. Select your project
-4. Use these filters to find auth logs:
 
-**All auth events:**
+**All auth events (both frontend and backend):**
 ```
 resource.type="cloud_run_revision"
-jsonPayload.message=~"LOGIN PAGE VISIT|MAGIC LINK SENT|MAGIC LINK ACCESSED|MAGIC LINK ERROR"
+(jsonPayload.message=~"LOGIN PAGE VISIT|MAGIC LINK SENT|MAGIC LINK ACCESSED|MAGIC LINK ERROR" OR textPayload=~"MAGIC LINK ACCESSED|AUTH EVENT")
 ```
 
-**Login page visits only:**
+**Login page visits only (backend):**
 ```
 resource.type="cloud_run_revision"
+resource.labels.service_name=~"backend|api"
 jsonPayload.message=~"LOGIN PAGE VISIT"
 ```
 
-**Magic link sends:**
+**Magic link sends (backend):**
 ```
 resource.type="cloud_run_revision"
+resource.labels.service_name=~"backend|api"
 jsonPayload.message=~"MAGIC LINK SENT"
 ```
 
-**Magic link accesses:**
+**Magic link accesses (FRONTEND logs):**
 ```
 resource.type="cloud_run_revision"
-jsonPayload.message=~"MAGIC LINK ACCESSED"
+resource.labels.service_name=~"frontend|web"
+(jsonPayload.message=~"MAGIC LINK ACCESSED" OR textPayload=~"MAGIC LINK ACCESSED")
 ```
 
-**Errors only:**
+**Errors only (both services):**
 ```
 resource.type="cloud_run_revision"
-jsonPayload.message=~"MAGIC LINK ERROR"
+(jsonPayload.message=~"MAGIC LINK ERROR" OR textPayload=~"MAGIC LINK ERROR")
 severity>=ERROR
+```
+
+**View by service:**
+```
+# Backend logs only
+resource.type="cloud_run_revision"
+resource.labels.service_name=~"backend|api"
+
+# Frontend logs only
+resource.type="cloud_run_revision"
+resource.labels.service_name=~"frontend|web"
 ```
 
 ### Local Development
@@ -178,12 +199,72 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 
 ## Troubleshooting
 
-### Logs not appearing
+### "403: invalid claim: missing sub claim" Error
+
+**What it means:** This error occurs when Supabase receives a JWT token that's missing the `sub` (subject/user ID) claim. This usually happens when a token is malformed, expired, or corrupted.
+
+**Common causes:**
+1. Partial token in cookies from a failed auth attempt
+2. Token corruption during the authentication flow
+3. Browser/antivirus clicking magic links before the user (creates partial sessions)
+4. Race conditions where the middleware checks auth before session is fully established
+
+**How it's fixed:**
+The middleware now:
+1. Checks for a valid session BEFORE trying to get user details
+2. Detects invalid token errors and clears corrupted cookies
+3. Signs out properly to clean up bad auth state
+4. Logs these errors so you can track when they occur
+
+**In the logs, you'll see:**
+```
+❌ MAGIC LINK ERROR - Error: Middleware getUser(): Invalid claim - invalid claim: missing sub claim, IP: xxx.xxx.xxx.xxx
+```
+
+**If you still see this error after the fix:**
+1. Check that the middleware changes are deployed
+2. Look for patterns - is it the same IP? Same time of day?
+3. Check if users are clicking links multiple times
+4. Verify email scanners aren't pre-clicking links (common with enterprise email)
+
+### "Magic Link Accessed" logs not appearing
+
+**The most common issue!** These logs appear in the **FRONTEND service logs**, not the backend.
+
+**How to find them:**
+
+1. Go to Cloud Logging in Google Cloud Console
+2. **Filter by your frontend service:**
+   ```
+   resource.type="cloud_run_revision"
+   resource.labels.service_name=~"frontend|web|bem-reports-web"
+   textPayload=~"MAGIC LINK ACCESSED"
+   ```
+
+3. Look for logs like:
+   ```
+   🔗 MAGIC LINK ACCESSED - User: abc-123, IP: xxx.xxx.xxx.xxx, URL: https://...
+   ```
+
+4. If you still don't see them:
+   - Check that the callback URL is being hit (look for any logs from `/callback`)
+   - Verify the magic link actually redirects to `/callback` (check the email)
+   - Look for error logs in the frontend service
+   - Check if the auth is completing (does the user successfully log in?)
+
+**The callback route logs will show:**
+- The exact moment the magic link is clicked
+- User ID from the session
+- IP address of the client
+- Full URL that was accessed
+
+### Other logs not appearing
 
 1. **Check API URL**: Ensure `NEXT_PUBLIC_API_BASE_URL` is correctly set in your frontend environment
 2. **Check Network**: Open browser DevTools → Network tab to see if `/log-auth-event/` requests are being made
 3. **Check Backend Logs**: Verify the backend is receiving the requests
 4. **Check CORS**: Ensure the frontend origin is in `ALLOWED_ORIGINS` in backend config
+5. **Check Service Names**: Make sure you're looking at logs from the correct service (frontend vs backend)
 
 ### IP Address shows as "unknown"
 
@@ -249,8 +330,9 @@ Potential improvements to consider:
 
 ### Frontend
 - `frontend/src/utils/authLogger.ts` - New utility for logging
-- `frontend/src/sections/auth/auth-forms/AuthLogin.tsx` - Added logging for page visits and magic link sends
+- `frontend/src/sections/auth/auth-forms/AuthLogin.tsx` - Added logging for page visits and magic link sends, plus improved error handling
 - `frontend/src/app/callback/route.ts` - Added logging for magic link accesses
+- `frontend/src/utils/supabase-middleware.ts` - Fixed "invalid claim: missing sub claim" errors with better token validation and cleanup
 
 ## Testing
 
