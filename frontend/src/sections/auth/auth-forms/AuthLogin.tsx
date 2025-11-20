@@ -26,6 +26,7 @@ import { Formik } from "formik";
 import AnimateButton from "components/@extended/AnimateButton";
 
 import { wakeUpApi } from "app/api/WakeUp";
+import { logAuthEvent } from "utils/authLogger";
 
 // assets
 import { useRouter } from "next/navigation";
@@ -42,6 +43,13 @@ const AuthLogin = () => {
   const [authFailedMessage, setAuthFailedMessage] = useState("");
 
   const router = useRouter();
+  
+  // Log login page visit
+  useEffect(() => {
+    logAuthEvent({
+      event_type: 'login_page_visit',
+    });
+  }, []); // Run only once when component mounts
   
   // Check for error parameters and clean up
   useEffect(() => {
@@ -174,6 +182,18 @@ const AuthLogin = () => {
 
         if (user) {
           console.log('User returned in OTP response, redirecting to dashboard');
+          
+          // Log successful magic link send (user.id may not be available in OTP response)
+          const userId = (user as any)?.id;
+          if (userId) {
+            logAuthEvent({
+              event_type: 'magic_link_sent',
+              email: email,
+              user_id: userId,
+              magic_link_url: redirectUrl,
+            });
+          }
+          
           router.push("/dashboard/default");
         }
       }
@@ -199,9 +219,25 @@ const AuthLogin = () => {
         } else {
           setCaptureError("An error occurred while sending the magic link. Please try again.");
         }
+        
+        // Log the error
+        logAuthEvent({
+          event_type: 'magic_link_error',
+          email: email,
+          error_message: error.message || 'Unknown error during magic link send',
+        });
       } else {
         console.log('Magic link sent successfully');
         setSuccess(true);
+        
+        // Log successful magic link send
+        // Note: We don't have user_id at this point since Supabase doesn't return it
+        // for security reasons, but we log the email and redirect URL
+        logAuthEvent({
+          event_type: 'magic_link_sent',
+          email: email,
+          magic_link_url: redirectUrl,
+        });
       }
     } catch (error) {
       console.error('Unexpected error in login:', error);
