@@ -3,7 +3,7 @@
  */
 
 interface AuthLogData {
-  event_type: 'login_page_visit' | 'magic_link_sent' | 'magic_link_accessed' | 'magic_link_error';
+  event_type: 'login_page_visit' | 'magic_link_sent' | 'magic_link_accessed' | 'magic_link_error' | 'otp_sent' | 'otp_verified' | 'otp_send_error' | 'otp_verify_error';
   email?: string;
   user_id?: string;
   ip_address?: string;

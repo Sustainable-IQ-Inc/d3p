@@ -64,7 +64,7 @@ def get_client_ip(request: Request) -> str:
 @app.post("/log-auth-event/")
 async def log_auth_event(item: models.AuthLog, request: Request):
     """
-    Log authentication events (login page visits, magic link sends, magic link accesses).
+    Log authentication events (login page visits, OTP sends, OTP verifications, magic links for backwards compatibility).
     This endpoint does not require authentication to allow logging of login attempts.
     """
     # Get the real IP address
@@ -92,6 +92,15 @@ async def log_auth_event(item: models.AuthLog, request: Request):
     # Log based on event type
     if item.event_type == "login_page_visit":
         logger.info(f"🔐 LOGIN PAGE VISIT - IP: {ip_address}, User-Agent: {item.user_agent}")
+    elif item.event_type == "otp_sent":
+        logger.info(f"📧 OTP SENT - Email: {item.email}, IP: {ip_address}")
+    elif item.event_type == "otp_verified":
+        logger.info(f"✅ OTP VERIFIED - Email: {item.email}, User ID: {item.user_id}, IP: {ip_address}")
+    elif item.event_type == "otp_send_error":
+        logger.error(f"❌ OTP SEND ERROR - Email: {item.email}, Error: {item.error_message}, IP: {ip_address}")
+    elif item.event_type == "otp_verify_error":
+        logger.error(f"❌ OTP VERIFY ERROR - Email: {item.email}, Error: {item.error_message}, IP: {ip_address}")
+    # Legacy magic link events (kept for backwards compatibility)
     elif item.event_type == "magic_link_sent":
         logger.info(f"📧 MAGIC LINK SENT - Email: {item.email}, User ID: {item.user_id}, URL: {item.magic_link_url}, IP: {ip_address}")
     elif item.event_type == "magic_link_accessed":

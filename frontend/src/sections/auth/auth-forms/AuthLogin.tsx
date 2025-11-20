@@ -21,9 +21,11 @@ import {
 // third party
 import * as Yup from "yup";
 import { Formik } from "formik";
+import OtpInput from 'react18-input-otp';
 
 // project import
 import AnimateButton from "components/@extended/AnimateButton";
+import { useTheme } from '@mui/material/styles';
 
 import { wakeUpApi } from "app/api/WakeUp";
 import { logAuthEvent } from "utils/authLogger";
@@ -31,16 +33,23 @@ import { logAuthEvent } from "utils/authLogger";
 // assets
 import { useRouter } from "next/navigation";
 
+// types
+import { ThemeMode } from 'types/config';
+
 // ============================|| AWS CONNITO - LOGIN ||============================ //
 
 const AuthLogin = () => {
   const supabase = useSupabase();
   const searchParams = useSearchParams();
+  const theme = useTheme();
 
-  const [success, setSuccess] = useState(false);
   const [captureError, setCaptureError] = useState("");
   const [showExpiredLinkMessage, setShowExpiredLinkMessage] = useState(false);
   const [authFailedMessage, setAuthFailedMessage] = useState("");
+  const [showOtpInput, setShowOtpInput] = useState(false);
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const router = useRouter();
   
@@ -211,45 +220,18 @@ const AuthLogin = () => {
 
   const login = async (email: string) => {
     try {
-      console.log('Requesting magic link for:', email);
+      console.log('Requesting OTP for:', email);
       
-      // Construct redirect URL - use window.location.origin for client-side
-      const redirectUrl = typeof window !== 'undefined' 
-        ? `${window.location.origin}/callback`
-        : `${process.env.REDIRECT_URL || 'http://localhost:8081'}/callback`;
-      
-      console.log('Email redirect URL:', redirectUrl);
-      
+      // Send OTP via email (no redirect URL - this sends a 6-digit code instead of a magic link)
       let { data: dataUser, error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: redirectUrl,
           shouldCreateUser: false,
         },
       });
 
       console.log('signInWithOtp result:', { data: dataUser, error });
 
-      if (dataUser) {
-        const { user } = dataUser;
-
-        if (user) {
-          console.log('User returned in OTP response, redirecting to dashboard');
-          
-          // Log successful magic link send (user.id may not be available in OTP response)
-          const userId = (user as any)?.id;
-          if (userId) {
-            logAuthEvent({
-              event_type: 'magic_link_sent',
-              email: email,
-              user_id: userId,
-              magic_link_url: redirectUrl,
-            });
-          }
-          
-          router.push("/dashboard/default");
-        }
-      }
       if (error) {
         console.error('Error in signInWithOtp:', error);
         console.error('Error details:', { 
@@ -270,26 +252,24 @@ const AuthLogin = () => {
         } else if (error.message) {
           setCaptureError(error.message);
         } else {
-          setCaptureError("An error occurred while sending the magic link. Please try again.");
+          setCaptureError("An error occurred while sending the verification code. Please try again.");
         }
         
         // Log the error
         logAuthEvent({
-          event_type: 'magic_link_error',
+          event_type: 'otp_send_error',
           email: email,
-          error_message: error.message || 'Unknown error during magic link send',
+          error_message: error.message || 'Unknown error during OTP send',
         });
       } else {
-        console.log('Magic link sent successfully');
-        setSuccess(true);
+        console.log('OTP sent successfully');
+        setEmail(email);
+        setShowOtpInput(true);
         
-        // Log successful magic link send
-        // Note: We don't have user_id at this point since Supabase doesn't return it
-        // for security reasons, but we log the email and redirect URL
+        // Log successful OTP send
         logAuthEvent({
-          event_type: 'magic_link_sent',
+          event_type: 'otp_sent',
           email: email,
-          magic_link_url: redirectUrl,
         });
       }
     } catch (error) {
@@ -308,6 +288,72 @@ const AuthLogin = () => {
     }
   };
 
+  const verifyOtp = async () => {
+    if (!otp || otp.length !== 6) {
+      setCaptureError("Please enter a valid 6-digit code.");
+      return;
+    }
+
+    setIsVerifying(true);
+    setCaptureError("");
+
+    try {
+      console.log('Verifying OTP for:', email);
+      
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token: otp,
+        type: 'email',
+      });
+
+      if (error) {
+        console.error('Error verifying OTP:', error);
+        
+        if (error.message?.toLowerCase().includes('expired')) {
+          setCaptureError("This code has expired. Please request a new one.");
+        } else if (error.message?.toLowerCase().includes('invalid')) {
+          setCaptureError("Invalid code. Please check and try again.");
+        } else {
+          setCaptureError(error.message || "Failed to verify code. Please try again.");
+        }
+        
+        // Log the error
+        logAuthEvent({
+          event_type: 'otp_verify_error',
+          email: email,
+          error_message: error.message || 'Unknown error during OTP verification',
+        });
+      } else if (data?.session) {
+        console.log('OTP verified successfully, user logged in');
+        
+        // Log successful OTP verification
+        logAuthEvent({
+          event_type: 'otp_verified',
+          email: email,
+          user_id: data.session.user.id,
+        });
+        
+        // Redirect to dashboard
+        router.push("/dashboard/default");
+        router.refresh();
+      } else {
+        setCaptureError("Failed to establish session. Please try again.");
+      }
+    } catch (error) {
+      console.error('Unexpected error verifying OTP:', error);
+      const err = error as any;
+      setCaptureError(err?.message || 'An unexpected error occurred. Please try again.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const resendOtp = async () => {
+    setCaptureError("");
+    setOtp("");
+    await login(email);
+  };
+
   // Debug: Log state changes
   console.log('AuthLogin render:', { 
     authFailedMessage, 
@@ -316,132 +362,197 @@ const AuthLogin = () => {
     authFailedMessageLength: authFailedMessage?.length 
   });
 
+  const borderColor = theme.palette.mode === ThemeMode.DARK ? theme.palette.grey[200] : theme.palette.grey[300];
+
   return (
     <>
-      <Formik
-        initialValues={{
-          email: "",
-          submit: null,
-        }}
-        validationSchema={Yup.object().shape({
-          email: Yup.string()
-            .email("Must be a valid email")
-            .max(255)
-            .required("Email is required"),
-        })}
-        onSubmit={(values, { setSubmitting }) => {
-          wakeUpApi();
-          // Clear previous messages
-          setCaptureError("");
-          setSuccess(false);
-          login(values.email);
-          setSubmitting(false);
-        }}
-      >
-        {({
-          errors,
-          handleBlur,
-          handleChange,
-          handleSubmit,
-          isSubmitting,
-          touched,
-          values,
-        }) => (
-          <form noValidate onSubmit={handleSubmit}>
-            <Grid container spacing={3}>
-              {showExpiredLinkMessage ? (
-                <Grid item xs={12}>
-                  <Alert severity="warning">
-                    <Typography variant="h6" sx={{ mb: 1 }}>
-                      <strong>Invite Link Expired</strong>
-                    </Typography>
-                    <Typography variant="body2" sx={{ mb: 2 }}>
-                      Your invite link has expired or has already been used.
-                      This often happens when antivirus software or email scanners automatically click links.
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>Please contact your administrator to resend your invitation.</strong>
-                    </Typography>
-                  </Alert>
-                </Grid>
-              ) : (
-                <>
-              {authFailedMessage && (
-                <Grid item xs={12}>
-                  <Alert severity="error">
-                    {authFailedMessage}
-                  </Alert>
-                </Grid>
-              )}
-              <Grid item xs={12}>
-                <Stack spacing={1}>
-                  <InputLabel htmlFor="email-login">Email Address</InputLabel>
-                  <OutlinedInput
-                    id="email-login"
-                    type="email"
-                    value={values.email}
-                    name="email"
-                    onBlur={handleBlur}
-                    onChange={handleChange}
-                    placeholder="Enter email address"
-                    fullWidth
-                    error={Boolean(touched.email && errors.email)}
-                  />
-                </Stack>
-                {touched.email && errors.email && (
-                  <FormHelperText
-                    error
-                    id="standard-weight-helper-text-email-login"
-                  >
-                    {errors.email}
-                  </FormHelperText>
+      {!showOtpInput ? (
+        <Formik
+          initialValues={{
+            email: "",
+            submit: null,
+          }}
+          validationSchema={Yup.object().shape({
+            email: Yup.string()
+              .email("Must be a valid email")
+              .max(255)
+              .required("Email is required"),
+          })}
+          onSubmit={(values, { setSubmitting }) => {
+            wakeUpApi();
+            // Clear previous messages
+            setCaptureError("");
+            login(values.email);
+            setSubmitting(false);
+          }}
+        >
+          {({
+            errors,
+            handleBlur,
+            handleChange,
+            handleSubmit,
+            isSubmitting,
+            touched,
+            values,
+          }) => (
+            <form noValidate onSubmit={handleSubmit}>
+              <Grid container spacing={3}>
+                {showExpiredLinkMessage ? (
+                  <Grid item xs={12}>
+                    <Alert severity="warning">
+                      <Typography variant="h6" sx={{ mb: 1 }}>
+                        <strong>Invite Link Expired</strong>
+                      </Typography>
+                      <Typography variant="body2" sx={{ mb: 2 }}>
+                        Your invite link has expired or has already been used.
+                        This often happens when antivirus software or email scanners automatically click links.
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Please contact your administrator to resend your invitation.</strong>
+                      </Typography>
+                    </Alert>
+                  </Grid>
+                ) : (
+                  <>
+                {authFailedMessage && (
+                  <Grid item xs={12}>
+                    <Alert severity="error">
+                      {authFailedMessage}
+                    </Alert>
+                  </Grid>
                 )}
-              </Grid>
+                <Grid item xs={12}>
+                  <Stack spacing={1}>
+                    <InputLabel htmlFor="email-login">Email Address</InputLabel>
+                    <OutlinedInput
+                      id="email-login"
+                      type="email"
+                      value={values.email}
+                      name="email"
+                      onBlur={handleBlur}
+                      onChange={handleChange}
+                      placeholder="Enter email address"
+                      fullWidth
+                      error={Boolean(touched.email && errors.email)}
+                    />
+                  </Stack>
+                  {touched.email && errors.email && (
+                    <FormHelperText
+                      error
+                      id="standard-weight-helper-text-email-login"
+                    >
+                      {errors.email}
+                    </FormHelperText>
+                  )}
+                </Grid>
 
-              <Grid item xs={12} sx={{ mt: -1 }}>
-                <Stack
-                  direction="row"
-                  justifyContent="space-between"
-                  alignItems="center"
-                  spacing={2}
-                ></Stack>
-              </Grid>
-              {errors.submit && (
-                <Grid item xs={12}>
-                  <FormHelperText error>{errors.submit}</FormHelperText>
+                <Grid item xs={12} sx={{ mt: -1 }}>
+                  <Stack
+                    direction="row"
+                    justifyContent="space-between"
+                    alignItems="center"
+                    spacing={2}
+                  ></Stack>
                 </Grid>
-              )}
-              <Grid item xs={12}>
-                <AnimateButton>
-                  <Button
-                    disableElevation
-                    disabled={isSubmitting}
-                    fullWidth
-                    size="large"
-                    type="submit"
-                    variant="contained"
-                    color="primary"
-                  >
-                    Send Magic Link
-                  </Button>
-                </AnimateButton>
-                {success && (
-                  <Alert severity="success" sx={{ mt: 2 }}>
-                    An email has been sent with a link to login.
-                  </Alert>
+                {errors.submit && (
+                  <Grid item xs={12}>
+                    <FormHelperText error>{errors.submit}</FormHelperText>
+                  </Grid>
                 )}
-                {captureError && (
-                  <Alert severity="error" sx={{ mt: 2 }}>
-                    {captureError}
-                  </Alert>
+                <Grid item xs={12}>
+                  <AnimateButton>
+                    <Button
+                      disableElevation
+                      disabled={isSubmitting}
+                      fullWidth
+                      size="large"
+                      type="submit"
+                      variant="contained"
+                      color="primary"
+                    >
+                      Send Verification Code
+                    </Button>
+                  </AnimateButton>
+                  {captureError && (
+                    <Alert severity="error" sx={{ mt: 2 }}>
+                      {captureError}
+                    </Alert>
+                  )}
+                </Grid>
+                  </>
                 )}
               </Grid>
-                </>
-              )}
-            </Grid>
-          </form>
-        )}
-      </Formik>
+            </form>
+          )}
+        </Formik>
+      ) : (
+        <Grid container spacing={3}>
+          <Grid item xs={12}>
+            <Alert severity="success">
+              A 6-digit verification code has been sent to <strong>{email}</strong>
+            </Alert>
+          </Grid>
+          <Grid item xs={12}>
+            <Stack spacing={1}>
+              <InputLabel>Enter Verification Code</InputLabel>
+              <OtpInput
+                value={otp}
+                onChange={(newOtp: string) => setOtp(newOtp)}
+                numInputs={6}
+                isInputNum={true}
+                containerStyle={{ justifyContent: 'space-between' }}
+                inputStyle={{
+                  width: '100%',
+                  margin: '8px',
+                  padding: '10px',
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: 4,
+                  fontSize: '18px',
+                  textAlign: 'center',
+                }}
+                focusStyle={{
+                  outline: 'none',
+                  boxShadow: theme.customShadows.primary,
+                  border: `1px solid ${theme.palette.primary.main}`
+                }}
+              />
+            </Stack>
+          </Grid>
+          <Grid item xs={12}>
+            <AnimateButton>
+              <Button
+                disableElevation
+                disabled={isVerifying || otp.length !== 6}
+                fullWidth
+                size="large"
+                variant="contained"
+                color="primary"
+                onClick={verifyOtp}
+              >
+                {isVerifying ? 'Verifying...' : 'Verify Code'}
+              </Button>
+            </AnimateButton>
+            {captureError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {captureError}
+              </Alert>
+            )}
+          </Grid>
+          <Grid item xs={12}>
+            <Stack direction="row" justifyContent="space-between" alignItems="baseline">
+              <Typography>Did not receive the code?</Typography>
+              <Typography 
+                variant="body1" 
+                sx={{ minWidth: 85, ml: 2, textDecoration: 'none', cursor: 'pointer' }} 
+                color="primary"
+                onClick={resendOtp}
+              >
+                Resend code
+              </Typography>
+            </Stack>
+          </Grid>
+        </Grid>
+      )}
     </>
   );
 };
