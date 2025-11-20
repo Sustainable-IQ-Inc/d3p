@@ -1,4 +1,4 @@
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -99,16 +99,34 @@ export async function GET(req: NextRequest){
     }
 
     if(code){
+        // Create response first so we can set cookies on it
+        let response = NextResponse.redirect(`${correctOrigin}/dashboard/default`)
+        
         const cookieStore = await cookies();
 
-        const supabase = createRouteHandlerClient({
-            cookies: () => cookieStore
-        })
+        // Use createServerClient for proper cookie handling (matches middleware)
+        const supabase = createServerClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            {
+                cookies: {
+                    get(name: string) {
+                        return cookieStore.get(name)?.value
+                    },
+                    set(name: string, value: string, options: CookieOptions) {
+                        cookieStore.set({ name, value, ...options })
+                        response.cookies.set({ name, value, ...options })
+                    },
+                    remove(name: string, options: CookieOptions) {
+                        cookieStore.set({ name, value: '', ...options })
+                        response.cookies.set({ name, value: '', ...options })
+                    },
+                },
+            }
+        )
         
         try {
-            const { data, error: exchangeError } = await supabase
-                .auth
-                .exchangeCodeForSession(code)
+            const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
             
             if (exchangeError) {
                 console.error('Error exchanging code for session:', exchangeError);
@@ -137,7 +155,8 @@ export async function GET(req: NextRequest){
                     ip_address: clientIp,
                 });
                 
-                return NextResponse.redirect(`${correctOrigin}/dashboard/default`);
+                // Return the response with cookies set
+                return response;
             } else {
                 // Log the error
                 await logAuthEvent({
