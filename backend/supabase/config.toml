@@ -93,6 +93,11 @@ double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
 enable_confirmations = false
 
+# Customize OTP email template
+[auth.email.template.magic_link]
+subject = "Your Verification Code"
+content_path = "./supabase/templates/magic_link.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

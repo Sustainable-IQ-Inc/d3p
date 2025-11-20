@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Verification Code</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: #f5f5f5;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #ffffff;
+    }
+    .header {
+      background-color: #1976d2;
+      padding: 40px 20px;
+      text-align: center;
+    }
+    .header h1 {
+      color: #ffffff;
+      margin: 0;
+      font-size: 28px;
+      font-weight: 600;
+    }
+    .content {
+      padding: 40px 30px;
+    }
+    .greeting {
+      font-size: 18px;
+      color: #333333;
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+    .message {
+      font-size: 16px;
+      color: #555555;
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }
+    .code-container {
+      background-color: #f8f9fa;
+      border: 2px solid #e9ecef;
+      border-radius: 8px;
+      padding: 30px;
+      text-align: center;
+      margin: 30px 0;
+    }
+    .code-label {
+      font-size: 14px;
+      color: #666666;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 15px;
+      font-weight: 600;
+    }
+    .code {
+      font-size: 42px;
+      font-weight: 700;
+      color: #1976d2;
+      letter-spacing: 8px;
+      font-family: 'Courier New', monospace;
+      margin: 10px 0;
+    }
+    .code-note {
+      font-size: 13px;
+      color: #888888;
+      margin-top: 15px;
+    }
+    .expiry-warning {
+      background-color: #fff3cd;
+      border-left: 4px solid #ffc107;
+      padding: 15px 20px;
+      margin: 25px 0;
+      border-radius: 4px;
+    }
+    .expiry-warning p {
+      margin: 0;
+      font-size: 14px;
+      color: #856404;
+    }
+    .expiry-warning strong {
+      font-weight: 600;
+    }
+    .security-note {
+      background-color: #f8f9fa;
+      border-radius: 6px;
+      padding: 20px;
+      margin-top: 30px;
+    }
+    .security-note h3 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+      color: #333333;
+    }
+    .security-note p {
+      margin: 5px 0;
+      font-size: 14px;
+      color: #666666;
+      line-height: 1.5;
+    }
+    .footer {
+      background-color: #f8f9fa;
+      padding: 30px;
+      text-align: center;
+      border-top: 1px solid #e9ecef;
+    }
+    .footer p {
+      margin: 5px 0;
+      font-size: 13px;
+      color: #888888;
+    }
+    .footer a {
+      color: #1976d2;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔐 Verification Code</h1>
+    </div>
+    
+    <div class="content">
+      <div class="greeting">
+        Hello!
+      </div>
+      
+      <div class="message">
+        You requested to sign in to your account. Use the verification code below to complete your login.
+      </div>
+      
+      <div class="code-container">
+        <div class="code-label">Your Verification Code</div>
+        <div class="code">{{ .Token }}</div>
+        <div class="code-note">Enter this code on the login page</div>
+      </div>
+      
+      <div class="expiry-warning">
+        <p><strong>⏰ Time Sensitive:</strong> This code will expire in <strong>60 minutes</strong>. If you don't use it in time, you'll need to request a new one.</p>
+      </div>
+      
+      <div class="message">
+        If you didn't request this code, you can safely ignore this email. Your account remains secure.
+      </div>
+      
+      <div class="security-note">
+        <h3>🛡️ Security Tips</h3>
+        <p>• Never share this code with anyone, including our support team</p>
+        <p>• We will never ask you for this code via phone or email</p>
+        <p>• Always verify you're on the official login page before entering the code</p>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <p>This email was sent to <strong>{{ .Email }}</strong></p>
+      <p>If you have any questions or concerns, please contact our support team.</p>
+      <p style="margin-top: 20px; font-size: 12px; color: #aaaaaa;">
+        This is an automated message, please do not reply to this email.
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+

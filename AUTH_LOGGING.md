@@ -2,11 +2,18 @@
 
 ## Overview
 
-This document describes the comprehensive authentication logging system implemented to help diagnose magic link login issues. The system logs three key events in the authentication flow:
+This document describes the comprehensive authentication logging system implemented to help diagnose login issues. The system logs key events in the authentication flow:
 
+### Current OTP-Based Authentication
 1. **Login Page Visits** - When a user lands on the login page
-2. **Magic Link Sends** - When a magic link is requested and sent
-3. **Magic Link Accesses** - When a user clicks on a magic link
+2. **OTP Sends** - When a 6-digit verification code is requested and sent
+3. **OTP Verifications** - When a user successfully verifies their OTP code
+4. **OTP Errors** - When OTP send or verification fails
+
+### Legacy Magic Link Authentication (Deprecated)
+For backwards compatibility, magic link events are still logged:
+1. **Magic Link Sends** - When a magic link was requested and sent
+2. **Magic Link Accesses** - When a user clicked on a magic link
 
 ## Implementation Details
 
@@ -26,7 +33,7 @@ A new POST endpoint that accepts authentication event logs from the frontend. Th
 
 ```python
 class AuthLog(BaseModel):
-    event_type: str  # 'login_page_visit', 'magic_link_sent', 'magic_link_accessed', 'magic_link_error'
+    event_type: str  # 'login_page_visit', 'otp_sent', 'otp_verified', 'otp_send_error', 'otp_verify_error', 'magic_link_sent', 'magic_link_accessed', 'magic_link_error'
     email: Optional[str] = None
     user_id: Optional[str] = None
     ip_address: Optional[str] = None
@@ -67,25 +74,34 @@ useEffect(() => {
 }, []);
 ```
 
-#### 3. Magic Link Send Logging
+#### 3. OTP Send Logging
 
 **Location:** `frontend/src/sections/auth/auth-forms/AuthLogin.tsx`
 
 Logs are created when:
-- Magic link is successfully requested (after `signInWithOtp` succeeds)
-- Magic link request fails (with error details)
+- OTP (6-digit verification code) is successfully requested (after `signInWithOtp` succeeds)
+- OTP request fails (with error details)
 
 Captured data:
 - Email address
-- User ID (when available)
-- Redirect URL where the magic link points
 - Error messages (if any)
 
-#### 4. Magic Link Access Logging
+#### 4. OTP Verification Logging
+
+**Location:** `frontend/src/sections/auth/auth-forms/AuthLogin.tsx`
+
+Logs when an OTP code is verified. This includes:
+- Successful verification attempts
+- Failed verification attempts (expired codes, invalid codes, etc.)
+- User ID (on success)
+- Email address
+- IP address of the client
+
+#### 5. Legacy Magic Link Access Logging (Deprecated)
 
 **Location:** `frontend/src/app/callback/route.ts`
 
-Logs when a magic link is clicked and processed. This includes:
+For backwards compatibility, still logs when old magic links are clicked and processed. This includes:
 - Successful authentication attempts
 - Failed authentication attempts (expired links, invalid codes, etc.)
 - User ID (on success)
@@ -98,6 +114,28 @@ Logs when a magic link is clicked and processed. This includes:
 ```
 🔐 LOGIN PAGE VISIT - IP: 192.168.1.100, User-Agent: Mozilla/5.0...
 ```
+
+### OTP Sent
+```
+📧 OTP SENT - Email: user@example.com, IP: 192.168.1.100
+```
+
+### OTP Verified
+```
+✅ OTP VERIFIED - Email: user@example.com, User ID: abc-123, IP: 192.168.1.100
+```
+
+### OTP Send Error
+```
+❌ OTP SEND ERROR - Email: user@example.com, Error: Too many requests, IP: 192.168.1.100
+```
+
+### OTP Verify Error
+```
+❌ OTP VERIFY ERROR - Email: user@example.com, Error: Invalid code, IP: 192.168.1.100
+```
+
+### Legacy Magic Link Formats (Deprecated)
 
 ### Magic Link Sent
 ```
@@ -135,7 +173,7 @@ All logs are sent to Google Cloud Logging and can be viewed in the Google Cloud 
 **All auth events (both frontend and backend):**
 ```
 resource.type="cloud_run_revision"
-(jsonPayload.message=~"LOGIN PAGE VISIT|MAGIC LINK SENT|MAGIC LINK ACCESSED|MAGIC LINK ERROR" OR textPayload=~"MAGIC LINK ACCESSED|AUTH EVENT")
+(jsonPayload.message=~"LOGIN PAGE VISIT|OTP SENT|OTP VERIFIED|OTP.*ERROR|MAGIC LINK" OR textPayload=~"OTP|MAGIC LINK|AUTH EVENT")
 ```
 
 **Login page visits only (backend):**
@@ -145,7 +183,21 @@ resource.labels.service_name=~"backend|api"
 jsonPayload.message=~"LOGIN PAGE VISIT"
 ```
 
-**Magic link sends (backend):**
+**OTP sends (backend):**
+```
+resource.type="cloud_run_revision"
+resource.labels.service_name=~"backend|api"
+jsonPayload.message=~"OTP SENT"
+```
+
+**OTP verifications (backend):**
+```
+resource.type="cloud_run_revision"
+resource.labels.service_name=~"backend|api"
+jsonPayload.message=~"OTP VERIFIED"
+```
+
+**Legacy magic link sends (backend):**
 ```
 resource.type="cloud_run_revision"
 resource.labels.service_name=~"backend|api"
@@ -294,7 +346,7 @@ Filter logs by IP address to see all authentication activity:
 jsonPayload.message=~"IP: 192.168.1.100"
 ```
 
-### Finding Failed Magic Links for a User
+### Finding Failed OTP Attempts for a User
 
 Search for a specific email and look for errors:
 ```
@@ -306,10 +358,17 @@ severity>=ERROR
 
 Use the timestamps to track the complete flow:
 1. User visits login page (login_page_visit)
-2. User requests magic link (magic_link_sent)
-3. User clicks magic link (magic_link_accessed)
+2. User requests OTP code (otp_sent)
+3. User verifies OTP code (otp_verified)
 
 Time gaps between events can help identify where users are getting stuck.
+
+### Legacy Magic Link Flow (Deprecated)
+
+For old magic link-based authentication:
+1. User visits login page (login_page_visit)
+2. User requests magic link (magic_link_sent)
+3. User clicks magic link (magic_link_accessed)
 
 ## Future Enhancements
 
@@ -343,20 +402,23 @@ Potential improvements to consider:
    - Check logs for "LOGIN PAGE VISIT" message
    - Verify IP address is captured
 
-2. **Test Magic Link Send Logging:**
-   - Enter email and click "Send Magic Link"
-   - Check logs for "MAGIC LINK SENT" message
-   - Verify email and URL are logged
+2. **Test OTP Send Logging:**
+   - Enter email and click "Send Verification Code"
+   - Check logs for "OTP SENT" message
+   - Verify email is logged
 
-3. **Test Magic Link Access Logging:**
-   - Click on a magic link from email
-   - Check logs for "MAGIC LINK ACCESSED" message
-   - Verify user ID and URL are logged
+3. **Test OTP Verification Logging:**
+   - Enter the 6-digit code from email
+   - Click "Verify Code"
+   - Check logs for "OTP VERIFIED" message
+   - Verify user ID and email are logged
 
 4. **Test Error Logging:**
-   - Try using an expired magic link
-   - Check logs for "MAGIC LINK ERROR" message
+   - Try entering an invalid OTP code
+   - Check logs for "OTP VERIFY ERROR" message
    - Verify error details are captured
+   - Try requesting too many OTPs quickly
+   - Check logs for "OTP SEND ERROR" message
 
 ### Automated Testing
 
