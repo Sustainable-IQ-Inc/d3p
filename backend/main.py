@@ -4,7 +4,7 @@ import os
 from supabase import create_client, Client
 from fastapi import HTTPException
 from fastapi.security import HTTPBearer
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
 import secrets
 import io
 from datetime import datetime
@@ -27,8 +27,10 @@ from external.ddx_pre_validation import validate_ddx_data, create_validation_sum
 
 
 from utils import return_enum_vals, get_enum_id, add_event_history, verify_token, supabase, create_app, url
+import logging
 
-
+# Set up logger for auth events
+logger = logging.getLogger(__name__)
 
 app = create_app()
 app.include_router(update_router)
@@ -39,6 +41,116 @@ security = HTTPBearer()
 @app.get("/wake-up/")
 async def submit_project(authorized: Dict[str, Union[bool, Optional[str]]] = Depends(verify_token)):
     return "success"
+
+def get_client_ip(request: Request) -> str:
+    """Extract the real client IP address from the request, handling proxies."""
+    # Check for forwarded IP addresses (Cloud Run, proxies, load balancers)
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        # X-Forwarded-For can contain multiple IPs, the first one is the original client
+        return forwarded.split(",")[0].strip()
+    
+    # Check for real IP header
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+    
+    # Fallback to direct client host
+    if request.client:
+        return request.client.host
+    
+    return "unknown"
+
+@app.post("/log-auth-event/")
+async def log_auth_event(item: models.AuthLog, request: Request):
+    """
+    Log authentication events (login page visits, OTP sends, OTP verifications, magic links for backwards compatibility).
+    This endpoint does not require authentication to allow logging of login attempts.
+    """
+    # Get the real IP address
+    ip_address = get_client_ip(request)
+    
+    # Build log message based on event type
+    log_data = {
+        "event_type": item.event_type,
+        "ip_address": ip_address,
+        "timestamp": datetime.now().isoformat(),
+    }
+    
+    # Add optional fields if present
+    if item.email:
+        log_data["email"] = item.email
+    if item.user_id:
+        log_data["user_id"] = item.user_id
+    if item.magic_link_url:
+        log_data["magic_link_url"] = item.magic_link_url
+    if item.user_agent:
+        log_data["user_agent"] = item.user_agent
+    if item.error_message:
+        log_data["error_message"] = item.error_message
+    
+    # Log based on event type
+    if item.event_type == "login_page_visit":
+        logger.info(f"🔐 LOGIN PAGE VISIT - IP: {ip_address}, User-Agent: {item.user_agent}")
+    elif item.event_type == "otp_sent":
+        logger.info(f"📧 OTP SENT - Email: {item.email}, IP: {ip_address}")
+    elif item.event_type == "otp_verified":
+        logger.info(f"✅ OTP VERIFIED - Email: {item.email}, User ID: {item.user_id}, IP: {ip_address}")
+    elif item.event_type == "otp_send_error":
+        logger.error(f"❌ OTP SEND ERROR - Email: {item.email}, Error: {item.error_message}, IP: {ip_address}")
+    elif item.event_type == "otp_verify_error":
+        logger.error(f"❌ OTP VERIFY ERROR - Email: {item.email}, Error: {item.error_message}, IP: {ip_address}")
+    # Legacy magic link events (kept for backwards compatibility)
+    elif item.event_type == "magic_link_sent":
+        logger.info(f"📧 MAGIC LINK SENT - Email: {item.email}, User ID: {item.user_id}, URL: {item.magic_link_url}, IP: {ip_address}")
+    elif item.event_type == "magic_link_accessed":
+        logger.info(f"🔗 MAGIC LINK ACCESSED - User ID: {item.user_id}, URL: {item.magic_link_url}, IP: {ip_address}")
+    elif item.event_type == "magic_link_error":
+        logger.error(f"❌ MAGIC LINK ERROR - Error: {item.error_message}, IP: {ip_address}")
+    else:
+        logger.info(f"🔐 AUTH EVENT - {item.event_type}: {log_data}")
+    
+    # Also log the complete data structure for debugging
+    logger.debug(f"Auth event details: {log_data}")
+    
+    return {"status": "logged", "ip_address": ip_address}
+
+# Redirect routes for old magic links that point to backend instead of frontend
+@app.get("/callback")
+async def redirect_callback_to_frontend(request: Request):
+    """
+    Redirect old magic links that point to backend /callback to the frontend.
+    This handles old magic login links that were created with the wrong emailRedirectTo URL.
+    """
+    # Get the frontend URL from environment variable
+    frontend_url = os.getenv('REDIRECT_URL', 'http://localhost:8081')
+    
+    # Preserve all query parameters and hash fragments
+    query_string = str(request.query_params)
+    redirect_url = f"{frontend_url}/callback"
+    if query_string:
+        redirect_url += f"?{query_string}"
+    
+    print(f"Redirecting backend /callback to frontend: {redirect_url}")
+    return RedirectResponse(url=redirect_url, status_code=307)
+
+@app.get("/login")
+async def redirect_login_to_frontend(request: Request):
+    """
+    Redirect login requests to the frontend.
+    This handles old magic links that might redirect to backend /login.
+    """
+    # Get the frontend URL from environment variable
+    frontend_url = os.getenv('REDIRECT_URL', 'http://localhost:8081')
+    
+    # Preserve all query parameters
+    query_string = str(request.query_params)
+    redirect_url = f"{frontend_url}/login"
+    if query_string:
+        redirect_url += f"?{query_string}"
+    
+    print(f"Redirecting backend /login to frontend: {redirect_url}")
+    return RedirectResponse(url=redirect_url, status_code=307)
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):

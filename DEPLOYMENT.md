@@ -463,8 +463,64 @@ If you see authentication errors, verify:
 
 This deployment uses:
 - **Cloud Run**: Pay per request (very cost-effective for low traffic)
-- **Secret Manager**: Small cost per secret. It's recommended to delete old secret versions periodically.
+- **Secret Manager**: Small cost per secret version. **Important**: Each deployment that updates secrets creates new versions, which accumulate costs.
 - **Artifact Registry**: Storage costs for Docker images
 - **Cloud Storage**: Storage costs for uploaded files
 
 For development/testing, costs should be minimal. Monitor your GCP billing dashboard.
+
+### Reducing Secret Manager Costs
+
+Secret Manager charges per version, so creating new versions on every deployment can get expensive. Here are strategies to reduce costs:
+
+#### Option 1: Use Cloud Run Environment Variables (Recommended for Static Values)
+
+For configuration values that rarely change (like `REDIRECT_URL`, `FRONTEND_URL`), use environment variables instead of secrets:
+
+```bash
+# Set directly in Cloud Run
+gcloud run services update staging-bem-reports-web \
+  --set-env-vars="NEXT_PUBLIC_SITE_URL=https://your-frontend.com" \
+  --region=us-central1
+```
+
+Or add to your `cloudbuild.yaml`:
+```yaml
+- '--set-env-vars=NEXT_PUBLIC_SITE_URL=${_FRONTEND_URL}'
+```
+
+**Benefits**: No additional cost, no secret versions created
+
+#### Option 2: Smart Secret Updates (Only When Changed)
+
+Use the provided `update-secrets-if-changed.sh` script to only create new versions when values actually change:
+
+```bash
+# Interactive update (only creates new versions if values changed)
+./update-secrets-if-changed.sh your-project-id
+
+# Update from environment file
+./update-secrets-if-changed.sh your-project-id
+# Then choose option 2 and provide your env file
+```
+
+This script:
+- Checks current secret values before updating
+- Only creates new versions if the value has changed
+- Prevents unnecessary version creation on every deployment
+- Saves significant costs over time
+
+#### Option 3: Periodic Cleanup of Old Versions
+
+Run the `cleanup-secret-versions.sh` script monthly to keep only recent versions:
+
+```bash
+# Keep only the 2 most recent versions of each secret
+./cleanup-secret-versions.sh your-project-id 2
+```
+
+**Recommended Approach**:
+1. Use **environment variables** for static config values (URLs, bucket names)
+2. Use **Secret Manager** only for sensitive data (API keys, passwords)
+3. Use `update-secrets-if-changed.sh` when manually updating secrets
+4. Run `cleanup-secret-versions.sh` monthly to clean up old versions

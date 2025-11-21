@@ -133,21 +133,34 @@ jobs:
           echo "streamlit_url=$STREAMLIT_URL" >> $GITHUB_OUTPUT
           echo "allowed_origins=$ALLOWED_ORIGINS" >> $GITHUB_OUTPUT
           
-          # Create secrets if they don't exist
+          # Create secrets if they don't exist, update only if value changed
           create_or_update_secret() {
             local secret_name=$1
             local secret_value=$2
             
-            # Create a temporary file to store the secret value
+            # Create a temporary file to store the new secret value
             local temp_file=$(mktemp)
             printf '%s' "$secret_value" > "$temp_file"
             
             if gcloud secrets describe $secret_name --project=$PROJECT_ID >/dev/null 2>&1; then
-              echo "Updating secret: $secret_name"
-              gcloud secrets versions add $secret_name --data-file="$temp_file"
+              # Secret exists - check if value has changed
+              echo "Checking if secret $secret_name has changed..."
+              
+              # Get current value
+              local current_value=$(gcloud secrets versions access latest --secret="$secret_name" --project=$PROJECT_ID 2>/dev/null || echo "")
+              
+              if [ "$current_value" = "$secret_value" ]; then
+                echo "✓ Secret $secret_name unchanged - skipping update (saving cost!)"
+              else
+                echo "↻ Secret $secret_name has changed - updating..."
+                gcloud secrets versions add $secret_name --data-file="$temp_file"
+                echo "✓ Updated secret: $secret_name"
+              fi
             else
-              echo "Creating secret: $secret_name"
-              gcloud secrets create $secret_name --data-file="$temp_file"
+              # Secret doesn't exist - create it
+              echo "Creating new secret: $secret_name"
+              gcloud secrets create $secret_name --data-file="$temp_file" --replication-policy="automatic"
+              echo "✓ Created secret: $secret_name"
             fi
             
             # Clean up temporary file
@@ -215,11 +228,21 @@ jobs:
           printf '%s' "$SIGNING_SA_BASE64" > "$SIGNING_TEMP_FILE"
           
           if gcloud secrets describe "SIGNING_SA_CREDENTIALS" --project=$PROJECT_ID >/dev/null 2>&1; then
-            echo "Updating secret: SIGNING_SA_CREDENTIALS"
-            gcloud secrets versions add "SIGNING_SA_CREDENTIALS" --data-file="$SIGNING_TEMP_FILE"
+            # Secret exists - check if value has changed
+            echo "Checking if SIGNING_SA_CREDENTIALS has changed..."
+            CURRENT_SIGNING_SA=$(gcloud secrets versions access latest --secret="SIGNING_SA_CREDENTIALS" --project=$PROJECT_ID 2>/dev/null || echo "")
+            
+            if [ "$CURRENT_SIGNING_SA" = "$SIGNING_SA_BASE64" ]; then
+              echo "✓ Secret SIGNING_SA_CREDENTIALS unchanged - skipping update (saving cost!)"
+            else
+              echo "↻ Secret SIGNING_SA_CREDENTIALS has changed - updating..."
+              gcloud secrets versions add "SIGNING_SA_CREDENTIALS" --data-file="$SIGNING_TEMP_FILE"
+              echo "✓ Updated secret: SIGNING_SA_CREDENTIALS"
+            fi
           else
-            echo "Creating secret: SIGNING_SA_CREDENTIALS"
-            gcloud secrets create "SIGNING_SA_CREDENTIALS" --data-file="$SIGNING_TEMP_FILE"
+            echo "Creating new secret: SIGNING_SA_CREDENTIALS"
+            gcloud secrets create "SIGNING_SA_CREDENTIALS" --data-file="$SIGNING_TEMP_FILE" --replication-policy="automatic"
+            echo "✓ Created secret: SIGNING_SA_CREDENTIALS"
           fi
           
           # Debug: Verify what was actually stored in the secret manager
@@ -320,13 +343,15 @@ jobs:
           SUPABASE_ANON_KEY=$(gcloud secrets versions access latest --secret="${ENVIRONMENT^^}_SUPABASE_ANON_KEY" --project=$PROJECT_ID)
           API_BASE_URL="${{ needs.setup.outputs.api_base_url }}"
           STREAMLIT_URL="${{ needs.setup.outputs.streamlit_url }}"
+          SITE_URL="${{ needs.setup.outputs.redirect_url }}"
           
           docker build -t "$IMAGE_NAME" \
             --build-arg NEXT_PUBLIC_ENV=$ENVIRONMENT \
             --build-arg NEXT_PUBLIC_SUPABASE_URL="$SUPABASE_URL" \
             --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
             --build-arg NEXT_PUBLIC_API_BASE_URL="$API_BASE_URL" \
-            --build-arg NEXT_PUBLIC_STREAMLIT_URL="$STREAMLIT_URL" .
+            --build-arg NEXT_PUBLIC_STREAMLIT_URL="$STREAMLIT_URL" \
+            --build-arg NEXT_PUBLIC_SITE_URL="$SITE_URL" .
           
           docker push $IMAGE_NAME
           

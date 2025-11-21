@@ -3,6 +3,15 @@ from typing import Optional, Dict, Union, List
 from dataclasses import dataclass
 from fastapi import Form, UploadFile
 
+class AuthLog(BaseModel):
+    event_type: str  # 'login_page_visit', 'magic_link_sent', 'magic_link_accessed', 'magic_link_error', 'otp_sent', 'otp_verified', 'otp_send_error', 'otp_verify_error'
+    email: Optional[str] = None
+    user_id: Optional[str] = None
+    ip_address: Optional[str] = None
+    magic_link_url: Optional[str] = None
+    user_agent: Optional[str] = None
+    error_message: Optional[str] = None
+
 class MultiUpload(BaseModel):
     design_files: Optional[list]
     baseline_files: Optional[list]

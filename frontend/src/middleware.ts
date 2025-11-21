@@ -14,9 +14,11 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * - login (login page - users need to access without auth)
+     * - callback (OAuth callback - handles its own auth)
      * - auth/confirm (magic link confirmation - needs to handle its own session)
      * Feel free to modify this pattern to include more paths.
      */
-    '/((?!_next/static|_next/image|favicon.ico|assets/images/icons|auth/confirm|login-admin).*)',
+    '/((?!_next/static|_next/image|favicon.ico|assets/images/icons|login|callback|auth/confirm|login-admin).*)',
   ],
 }
