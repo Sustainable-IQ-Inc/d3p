@@ -357,8 +357,10 @@ const AuthLogin = () => {
         
         // Redirect to dashboard
         console.log('Redirecting to dashboard...');
-        router.push("/dashboard/default");
-        router.refresh();
+        
+        // Use hard redirect for production reliability
+        // This ensures cookies are properly read on the next page load
+        window.location.href = '/dashboard/default';
       } else if (data?.user) {
         // Sometimes session isn't immediately available but user is
         console.log('OTP verified with user but no session, checking session...');
@@ -381,8 +383,8 @@ const AuthLogin = () => {
           setAuthFailedMessage("");
           setShowExpiredLinkMessage(false);
           
-          router.push("/dashboard/default");
-          router.refresh();
+          // Use hard redirect for production reliability
+          window.location.href = '/dashboard/default';
         } else {
           console.error('No session available after verification');
           setCaptureError("Verification succeeded but session not established. Please try logging in again.");
