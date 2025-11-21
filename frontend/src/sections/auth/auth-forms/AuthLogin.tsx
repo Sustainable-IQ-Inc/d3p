@@ -195,7 +195,10 @@ const AuthLogin = () => {
         
         // SIGNED_IN event means user just logged in successfully - always redirect
         if (event === "SIGNED_IN" && session) {
-          console.log('User signed in, redirecting to dashboard...');
+          console.log('User signed in via auth listener, redirecting to dashboard...');
+          // Clear any error states that might interfere
+          setAuthFailedMessage("");
+          setShowExpiredLinkMessage(false);
           router.push("/dashboard/default");
           router.refresh();
         }
@@ -209,6 +212,9 @@ const AuthLogin = () => {
         else if (event === "SIGNED_OUT") {
           console.log('User signed out');
         }
+        else {
+          console.log('Auth state change not handled:', event);
+        }
       }
     );
 
@@ -221,6 +227,11 @@ const AuthLogin = () => {
   const login = async (email: string) => {
     try {
       console.log('Requesting OTP for:', email);
+      
+      // Clear any previous error states when starting fresh OTP flow
+      setAuthFailedMessage("");
+      setShowExpiredLinkMessage(false);
+      setCaptureError("");
       
       // Send OTP via email (no redirect URL - this sends a 6-digit code instead of a magic link)
       let { data: dataUser, error } = await supabase.auth.signInWithOtp({
@@ -306,6 +317,13 @@ const AuthLogin = () => {
         type: 'email',
       });
 
+      console.log('verifyOtp response:', { 
+        hasData: !!data, 
+        hasSession: !!data?.session, 
+        hasUser: !!data?.user,
+        error: error 
+      });
+
       if (error) {
         console.error('Error verifying OTP:', error);
         
@@ -324,7 +342,7 @@ const AuthLogin = () => {
           error_message: error.message || 'Unknown error during OTP verification',
         });
       } else if (data?.session) {
-        console.log('OTP verified successfully, user logged in');
+        console.log('OTP verified successfully with session, user logged in');
         
         // Log successful OTP verification
         logAuthEvent({
@@ -333,10 +351,44 @@ const AuthLogin = () => {
           user_id: data.session.user.id,
         });
         
+        // Clear any error states that might interfere with redirect
+        setAuthFailedMessage("");
+        setShowExpiredLinkMessage(false);
+        
         // Redirect to dashboard
+        console.log('Redirecting to dashboard...');
         router.push("/dashboard/default");
         router.refresh();
+      } else if (data?.user) {
+        // Sometimes session isn't immediately available but user is
+        console.log('OTP verified with user but no session, checking session...');
+        
+        // Wait a moment and check for session
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const { data: sessionData } = await supabase.auth.getSession();
+        
+        if (sessionData?.session) {
+          console.log('Session now available, redirecting...');
+          
+          // Log successful OTP verification
+          logAuthEvent({
+            event_type: 'otp_verified',
+            email: email,
+            user_id: sessionData.session.user.id,
+          });
+          
+          // Clear any error states
+          setAuthFailedMessage("");
+          setShowExpiredLinkMessage(false);
+          
+          router.push("/dashboard/default");
+          router.refresh();
+        } else {
+          console.error('No session available after verification');
+          setCaptureError("Verification succeeded but session not established. Please try logging in again.");
+        }
       } else {
+        console.error('No session or user data returned from verifyOtp');
         setCaptureError("Failed to establish session. Please try again.");
       }
     } catch (error) {
@@ -367,124 +419,121 @@ const AuthLogin = () => {
   return (
     <>
       {!showOtpInput ? (
-        <Formik
-          initialValues={{
-            email: "",
-            submit: null,
-          }}
-          validationSchema={Yup.object().shape({
-            email: Yup.string()
-              .email("Must be a valid email")
-              .max(255)
-              .required("Email is required"),
-          })}
-          onSubmit={(values, { setSubmitting }) => {
-            wakeUpApi();
-            // Clear previous messages
-            setCaptureError("");
-            login(values.email);
-            setSubmitting(false);
-          }}
-        >
-          {({
-            errors,
-            handleBlur,
-            handleChange,
-            handleSubmit,
-            isSubmitting,
-            touched,
-            values,
-          }) => (
-            <form noValidate onSubmit={handleSubmit}>
-              <Grid container spacing={3}>
-                {showExpiredLinkMessage ? (
-                  <Grid item xs={12}>
-                    <Alert severity="warning">
-                      <Typography variant="h6" sx={{ mb: 1 }}>
-                        <strong>Invite Link Expired</strong>
-                      </Typography>
-                      <Typography variant="body2" sx={{ mb: 2 }}>
-                        Your invite link has expired or has already been used.
-                        This often happens when antivirus software or email scanners automatically click links.
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Please contact your administrator to resend your invitation.</strong>
-                      </Typography>
-                    </Alert>
-                  </Grid>
-                ) : (
-                  <>
-                {authFailedMessage && (
-                  <Grid item xs={12}>
-                    <Alert severity="error">
-                      {authFailedMessage}
-                    </Alert>
-                  </Grid>
-                )}
+      <Formik
+        initialValues={{
+          email: "",
+          submit: null,
+        }}
+        validationSchema={Yup.object().shape({
+          email: Yup.string()
+            .email("Must be a valid email")
+            .max(255)
+            .required("Email is required"),
+        })}
+        onSubmit={(values, { setSubmitting }) => {
+          wakeUpApi();
+          // Clear previous messages
+          setCaptureError("");
+          login(values.email);
+          setSubmitting(false);
+        }}
+      >
+        {({
+          errors,
+          handleBlur,
+          handleChange,
+          handleSubmit,
+          isSubmitting,
+          touched,
+          values,
+        }) => (
+          <form noValidate onSubmit={handleSubmit}>
+            <Grid container spacing={3}>
+              {showExpiredLinkMessage && (
                 <Grid item xs={12}>
-                  <Stack spacing={1}>
-                    <InputLabel htmlFor="email-login">Email Address</InputLabel>
-                    <OutlinedInput
-                      id="email-login"
-                      type="email"
-                      value={values.email}
-                      name="email"
-                      onBlur={handleBlur}
-                      onChange={handleChange}
-                      placeholder="Enter email address"
-                      fullWidth
-                      error={Boolean(touched.email && errors.email)}
-                    />
-                  </Stack>
-                  {touched.email && errors.email && (
-                    <FormHelperText
-                      error
-                      id="standard-weight-helper-text-email-login"
-                    >
-                      {errors.email}
-                    </FormHelperText>
-                  )}
+                  <Alert severity="warning">
+                    <Typography variant="h6" sx={{ mb: 1 }}>
+                      <strong>Invite Link Expired</strong>
+                    </Typography>
+                    <Typography variant="body2" sx={{ mb: 2 }}>
+                      Your invite link has expired or has already been used.
+                      This often happens when antivirus software or email scanners automatically click links.
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>You can still log in by entering your email below to receive a verification code.</strong>
+                    </Typography>
+                  </Alert>
                 </Grid>
-
-                <Grid item xs={12} sx={{ mt: -1 }}>
-                  <Stack
-                    direction="row"
-                    justifyContent="space-between"
-                    alignItems="center"
-                    spacing={2}
-                  ></Stack>
-                </Grid>
-                {errors.submit && (
-                  <Grid item xs={12}>
-                    <FormHelperText error>{errors.submit}</FormHelperText>
-                  </Grid>
-                )}
+              )}
+              {authFailedMessage && (
                 <Grid item xs={12}>
-                  <AnimateButton>
-                    <Button
-                      disableElevation
-                      disabled={isSubmitting}
-                      fullWidth
-                      size="large"
-                      type="submit"
-                      variant="contained"
-                      color="primary"
-                    >
-                      Send Verification Code
-                    </Button>
-                  </AnimateButton>
-                  {captureError && (
-                    <Alert severity="error" sx={{ mt: 2 }}>
-                      {captureError}
-                    </Alert>
-                  )}
+                  <Alert severity="error">
+                    {authFailedMessage}
+                  </Alert>
                 </Grid>
-                  </>
+              )}
+              <Grid item xs={12}>
+                <Stack spacing={1}>
+                  <InputLabel htmlFor="email-login">Email Address</InputLabel>
+                  <OutlinedInput
+                    id="email-login"
+                    type="email"
+                    value={values.email}
+                    name="email"
+                    onBlur={handleBlur}
+                    onChange={handleChange}
+                    placeholder="Enter email address"
+                    fullWidth
+                    error={Boolean(touched.email && errors.email)}
+                  />
+                </Stack>
+                {touched.email && errors.email && (
+                  <FormHelperText
+                    error
+                    id="standard-weight-helper-text-email-login"
+                  >
+                    {errors.email}
+                  </FormHelperText>
                 )}
               </Grid>
-            </form>
-          )}
-        </Formik>
+
+              <Grid item xs={12} sx={{ mt: -1 }}>
+                <Stack
+                  direction="row"
+                  justifyContent="space-between"
+                  alignItems="center"
+                  spacing={2}
+                ></Stack>
+              </Grid>
+              {errors.submit && (
+                <Grid item xs={12}>
+                  <FormHelperText error>{errors.submit}</FormHelperText>
+                </Grid>
+              )}
+              <Grid item xs={12}>
+                <AnimateButton>
+                  <Button
+                    disableElevation
+                    disabled={isSubmitting}
+                    fullWidth
+                    size="large"
+                    type="submit"
+                    variant="contained"
+                    color="primary"
+                  >
+                      Send Verification Code
+                  </Button>
+                </AnimateButton>
+                {captureError && (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    {captureError}
+                  </Alert>
+                )}
+              </Grid>
+            </Grid>
+          </form>
+        )}
+      </Formik>
       ) : (
         <Grid container spacing={3}>
           <Grid item xs={12}>
