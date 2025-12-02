@@ -103,14 +103,62 @@ def _get_empty_weather_info():
 def _process_iesve_weather(weather_string):
     """Process weather data for IESVE, IESVE_PRM, and EPLUS report types"""
     try:
-        # Extract WMO code from weather string
-        wmo_code = int(re.findall(r'.(\d{6})', weather_string)[0])
+        if not weather_string or not str(weather_string).strip():
+            logging_start.logger.error(f"IESVE weather processing failed: Empty weather string")
+            return None
         
-        # Load and filter weather data
+        # Extract WMO code from weather string - try multiple patterns
+        wmo_code = None
+        weather_str_clean = str(weather_string).replace('…', '').replace('...', '').strip()
+        
+        # Load weather data once for validation
         df_weather = pd.read_csv(os.path.join(current_dir, 'dependencies/weather_output_new.csv'))
+        
+        # Pattern 1: Look for dot followed by 6 digits (e.g., .722780)
+        wmo_matches = re.findall(r'\.(\d{6})', weather_str_clean)
+        if wmo_matches:
+            wmo_code = int(wmo_matches[0])
+        else:
+            # Pattern 2: Look for 6 consecutive digits anywhere
+            wmo_matches = re.findall(r'(\d{6})', weather_str_clean)
+            if wmo_matches:
+                # Use the first 6-digit sequence found
+                wmo_code = int(wmo_matches[0])
+            else:
+                # Pattern 3: Handle truncated codes - look for 5 digits
+                # Common pattern: .72278… should be 722780
+                wmo_matches = re.findall(r'\.(\d{5})', weather_str_clean)
+                if wmo_matches:
+                    # Try appending 0-9 to find valid WMO code
+                    base_code = wmo_matches[0]
+                    for digit in range(10):
+                        potential_code = int(base_code + str(digit))
+                        if not df_weather.loc[df_weather['wmo_code'] == potential_code].empty:
+                            wmo_code = potential_code
+                            break
+                else:
+                    # Pattern 4: Look for any 5-digit sequence that might be truncated
+                    wmo_matches = re.findall(r'(\d{5})', weather_str_clean)
+                    if wmo_matches:
+                        # Try appending 0-9 to find valid WMO code
+                        for match in wmo_matches:
+                            for digit in range(10):
+                                potential_code = int(match + str(digit))
+                                if not df_weather.loc[df_weather['wmo_code'] == potential_code].empty:
+                                    wmo_code = potential_code
+                                    break
+                            if wmo_code:
+                                break
+        
+        if wmo_code is None:
+            logging_start.logger.error(f"IESVE weather processing failed: Could not extract WMO code from weather string: '{weather_string}' (cleaned: '{weather_str_clean}')")
+            return None
+        
+        # Filter weather data by WMO code
         df_weather_new = df_weather.loc[df_weather['wmo_code'] == wmo_code]
         
         if df_weather_new.empty:
+            logging_start.logger.error(f"IESVE weather processing failed: No weather data found for WMO code: {wmo_code} (from weather string: '{weather_string}')")
             return None
             
         # Extract location data
@@ -120,19 +168,28 @@ def _process_iesve_weather(weather_string):
         
         # Get zip code and state
         zip_code = latlong_to_zip(lat, long)
+        if not zip_code:
+            logging_start.logger.warning(f"Could not get zip code from lat/long: {lat}, {long}")
+        
         df_cities = pd.read_csv(os.path.join(current_dir, 'dependencies/uscities.csv'))
-        state = df_cities.loc[df_cities['zips'].str.contains(str(zip_code), na=False), 'state_name'].iloc[0]
+        state = ''
+        if zip_code:
+            matching_cities = df_cities.loc[df_cities['zips'].str.contains(str(zip_code), na=False)]
+            if not matching_cities.empty:
+                state = matching_cities.iloc[0]['state_name']
         
         return {
             'city_name': weather_string,
             'ratio_match': 0,
             'climate_zone': climate_zone,
-            'zip_code': zip_code,
+            'zip_code': zip_code if zip_code else '',
             'city': '',  # Add missing city field
             'state': state
         }
     except Exception as e:
-        logging_start.logger.error(f"IESVE weather processing failed: {str(e)}")
+        logging_start.logger.error(f"IESVE weather processing failed for weather_string '{weather_string}': {str(e)}")
+        import traceback
+        logging_start.logger.error(traceback.format_exc())
         return None
 
 def _process_equest_beps_weather(weather_string):
