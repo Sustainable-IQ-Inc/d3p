@@ -71,7 +71,7 @@ def parse_report_iesve(url):
             cleaned_headers.append('')
     
     # Try to merge split headers by looking for patterns
-    # Common pattern: "Site Energy" might be split as "Site Energy   So" and "urce Energy CO2"
+    # Common patterns where headers are split across cells
     merged_headers = []
     i = 0
     while i < len(cleaned_headers):
@@ -81,23 +81,75 @@ def parse_report_iesve(url):
         if i < len(cleaned_headers) - 1:
             next_header = cleaned_headers[i + 1]
             
-            # Pattern: "Site Energy   So" + "urce Energy CO2" = "Site Energy" + "Source Energy CO2"
+            # Pattern 1: "Energy End Use Site E" + "nergy Sou" + "rce Energy CO2"
+            # = "Energy End Use Site" + "Energy" + "Source Energy CO2"
+            # The "nergy Sou" cell contains TWO fragments: "nergy" (end of "Energy") and "Sou" (start of "Source")
+            if "Energy End Use Site" in current and (current.endswith(" E") or current.endswith("E")):
+                if next_header.startswith("nergy") or "nergy" in next_header:
+                    merged_headers.append("Energy End Use Site")
+                    # Check if there's a third header that's "rce Energy CO2"
+                    if i + 2 < len(cleaned_headers):
+                        third_header = cleaned_headers[i + 2]
+                        if "rce Energy" in third_header or ("rce" in third_header and "Energy" in third_header):
+                            # Pattern confirmed: "Energy End Use Site E" + "nergy Sou" + "rce Energy CO2"
+                            # The "nergy Sou" has "nergy" (from "Energy") - we'll use "Energy" for this column
+                            # The "Sou" part goes with "rce Energy CO2" to make "Source Energy CO2"
+                            merged_headers.append("Energy")  # "E" + "nergy" = "Energy"
+                            # Combine "Sou" from next_header with third_header to make "Source Energy CO2"
+                            if "Sou" in next_header:
+                                merged_headers.append("Source Energy CO2")  # "Sou" + "rce Energy CO2"
+                            else:
+                                merged_headers.append("Source Energy CO2")
+                            i += 3
+                            continue
+                    # If no third header, the "nergy Sou" might just be "Energy" (ignore "Sou" part)
+                    merged_headers.append("Energy")
+                    i += 2
+                    continue
+            
+            # Pattern 2: "Site Energy   So" + "urce Energy CO2" = "Site Energy" + "Source Energy CO2"
             if "Site Energy" in current and "urce Energy" in next_header:
                 merged_headers.append("Site Energy")
                 merged_headers.append("Source Energy CO2")
                 i += 2
                 continue
-            # Pattern: "Site Energy" at end + "Source" at start of next
+            
+            # Pattern 3: "Site Energy" at end + "Source" at start of next
             elif current.endswith("Site Energy") and next_header.startswith("Source"):
                 merged_headers.append("Site Energy")
                 merged_headers.append("Source Energy CO2")
                 i += 2
                 continue
-            # Pattern: "Emi" + "ssions" or similar
+            
+            # Pattern 4: Handle "nergy Sou" as a standalone fragment (if not already handled)
+            # This might be "Energy" split, where "E" was at end of previous column
+            elif current.startswith("nergy") and len(current) < 15:
+                # Check if previous header ended with " E" (already handled in Pattern 1)
+                if i > 0:
+                    prev_header = cleaned_headers[i - 1] if i > 0 else ""
+                    if "Energy End Use Site" in prev_header and prev_header.endswith(" E"):
+                        # Already handled by Pattern 1, skip this
+                        merged_headers.append(current)  # Keep as-is for now
+                        i += 1
+                        continue
+                # Otherwise, treat "nergy" as "Energy"
+                merged_headers.append("Energy")
+                i += 1
+                continue
+            
+            # Pattern 5: "Emi" + "ssions" or similar
             elif current == "Emi" and next_header.startswith("ssions"):
                 merged_headers.append("CO2 Emissions")
                 i += 2
                 continue
+            
+            # Pattern 6: "rce Energy CO2" (fragment) - might be preceded by something
+            elif next_header.startswith("rce Energy") and "Source" not in current:
+                # Previous header might have been split
+                if "Sou" in current or current.endswith(" Sou"):
+                    merged_headers.append("Source Energy CO2")
+                    i += 2
+                    continue
         
         merged_headers.append(current)
         i += 1
@@ -105,6 +157,11 @@ def parse_report_iesve(url):
     # Use cleaned/merged headers
     # Ensure we have the right number of columns (use original count, pad if needed)
     num_cols_needed = len(eeu_table[0]) if len(eeu_table) > 0 else 0
+    
+    # Debug: print what we have
+    print(f"DEBUG: Original headers: {cleaned_headers[:num_cols_needed]}")
+    print(f"DEBUG: Merged headers: {merged_headers}")
+    
     if len(merged_headers) < num_cols_needed:
         # Pad with empty strings if we merged columns
         merged_headers.extend([''] * (num_cols_needed - len(merged_headers)))
@@ -124,12 +181,13 @@ def parse_report_iesve(url):
     # Validate required columns exist before processing
     # Use flexible matching for split/malformed column names
     energy_col = None
+    
+    # First, try to find complete column names
     for col in df.columns:
         col_str = str(col).strip()
         col_lower = col_str.lower().replace(' ', '').replace('\n', '').replace('\r', '')
         
         # Look for "site energy" - check if column contains these words in order
-        # Handle cases like "Site Energy   So" where "Site Energy" appears first
         if 'site' in col_lower and 'energy' in col_lower:
             # Make sure "site" comes before "energy" and it's not "source energy"
             site_idx = col_lower.find('site')
@@ -142,12 +200,21 @@ def parse_report_iesve(url):
             energy_col = col
             break
     
-    # If still not found, try looking for columns that start with "Site Energy" even with extra text
+    # If still not found, try looking for partial matches (split headers)
     if energy_col is None:
         for col in df.columns:
             col_str = str(col).strip()
+            col_lower = col_str.lower()
+            
+            # Check for "nergy" which might be part of "Energy" or "Site Energy"
+            if 'nergy' in col_lower and 'end' not in col_lower:
+                # This might be a fragment - check if we can use it
+                energy_col = col
+                print(f"Using partial match for energy column: '{col}'")
+                break
+            
+            # Check for columns starting with "Site Energy" even with extra text
             if col_str.startswith('Site Energy') or 'Site Energy' in col_str:
-                # Make sure it's not "Source Energy"
                 if not col_str.startswith('Source'):
                     energy_col = col
                     break
@@ -167,22 +234,38 @@ def parse_report_iesve(url):
     # Find report field column using flexible matching
     report_field_col = None
     for col in df.columns:
-        col_lower = str(col).lower().replace(' ', '')
+        col_str = str(col).strip()
+        col_lower = col_str.lower().replace(' ', '')
+        # Look for "Energy End Use" - handle cases like "Energy End Use Site E"
         if 'energyenduse' in col_lower or 'enduse' in col_lower:
+            report_field_col = col
+            break
+        # Also check for partial matches
+        elif 'energy' in col_lower and 'end' in col_lower and 'use' in col_lower:
             report_field_col = col
             break
     if report_field_col:
         rename_map[report_field_col] = 'report_field'
     
-    # Use the energy_col we found earlier
+    # Use the energy_col we found earlier (may be a partial match like "nergy Sou")
     if energy_col:
         rename_map[energy_col] = 'energy_value'
     
     # Handle source energy columns with flexible matching
     source_energy_col = None
     for col in df.columns:
-        col_lower = str(col).lower().replace(' ', '')
+        col_str = str(col).strip()
+        col_lower = col_str.lower().replace(' ', '')
+        # Look for "Source Energy CO2" or fragments like "rce Energy CO2"
         if 'sourceenergy' in col_lower or (col_lower.startswith('source') and 'energy' in col_lower):
+            source_energy_col = col
+            break
+        # Handle fragment "rce Energy CO2"
+        elif col_lower.startswith('rce') and 'energy' in col_lower and 'co2' in col_lower:
+            source_energy_col = col
+            break
+        # Handle "Source Energy CO2" split as separate columns
+        elif 'rce energy co2' in col_lower or col_lower == 'rce energy co2':
             source_energy_col = col
             break
     if source_energy_col:
@@ -191,8 +274,14 @@ def parse_report_iesve(url):
     # Handle emissions columns with flexible matching
     emissions_col = None
     for col in df.columns:
-        col_lower = str(col).lower().replace(' ', '')
-        if 'emissions' in col_lower or col_lower == 'emi' or (col_lower.startswith('co2') and 'em' in col_lower):
+        col_str = str(col).strip()
+        col_lower = col_str.lower().replace(' ', '')
+        # Look for "Emissions" or "CO2 Emissions" or fragment "Em"
+        if 'emissions' in col_lower or (col_lower.startswith('co2') and 'em' in col_lower):
+            emissions_col = col
+            break
+        # Handle fragment "Em"
+        elif col_lower == 'em' or col_lower == 'emi':
             emissions_col = col
             break
     if emissions_col:
