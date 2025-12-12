@@ -40,6 +40,7 @@ interface FileData extends KeyMetricFields {
   upload_id: number;
   visible?: boolean;
   baseline_file_data?: FileData;
+  upload_attempted?: boolean;
 }
 export type PrepopulatedDataProps = {
   project_use_type_id: number;
@@ -62,6 +63,7 @@ interface RecordData extends KeyMetricFields {
   project_id: UUID;
   year: number;
   reporting_year: number;
+  upload_attempted?: boolean;
 }
 
 const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
@@ -97,7 +99,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
         rowData.baseline_file_data.id !== undefined
           ? rowData.baseline_file_data.id
           : null,
-      design_eeu_id: rowData.id,
+      design_eeu_id: rowData.id !== undefined ? rowData.id : null,
       year: rowData.year,
       reporting_year: rowData.reporting_year,
       use_type_subtype_id:
@@ -107,24 +109,32 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
     };
 
     (async () => {
-      const status = await submitUpload({ uploadProps: submitData });
+      try {
+        const status = await submitUpload({ uploadProps: submitData });
 
-      if (status === "success") {
-        message.success(
-          <Typography>
-            Project submitted successfully.
-            <br />
-            <Link
-              href={`/projects/${submitData.project_id}`}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              View Details
-            </Link>
-          </Typography>
-        );
+        if (status === "success") {
+          message.success(
+            <Typography>
+              Project submitted successfully.
+              <br />
+              <Link
+                href={`/projects/${submitData.project_id}`}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                View Details
+              </Link>
+            </Typography>
+          );
 
-        remove(index); // remove the row from the array
+          remove(index); // remove the row from the array
+        } else {
+          message.error("Failed to submit project. Please try again.");
+        }
+      } catch (error: any) {
+        console.error("Error submitting project:", error);
+        const errorMessage = error?.message || error?.response?.data?.error || "An error occurred while submitting the project. Please check the console for details.";
+        message.error(errorMessage);
       }
     })();
     // This is just a placeholder. Replace it with your actual submit logic.
@@ -169,6 +179,8 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
       const updatedUploads = data.uploads.map((upload: any) => ({
         ...upload,
         baseline_file_data: null,
+        // Mark upload as attempted if there's an id OR if it's a failed upload
+        upload_attempted: upload.id !== undefined || upload.upload_attempted === true,
         // Ensure year and reporting_year are properly initialized
         year: upload.year || currentYear,
         reporting_year: upload.reporting_year || currentYear,
@@ -180,10 +192,31 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
         has_subtypes: upload.has_subtypes || false,
         project_id: upload.project_id || "00000000-0000-0000-0000-000000000000",
       }));
+      
+      // Add failed uploads as records with upload_attempted = true but no id
+      const failedUploadRecords = (data.failed_uploads || []).map((failedUpload: any) => ({
+        id: undefined,
+        upload_attempted: true,
+        file_name: failedUpload.file_name || failedUpload.response?.file_name || 'Unknown file',
+        baseline_file_data: null,
+        year: currentYear,
+        reporting_year: currentYear,
+        project_use_type_id: 0,
+        project_phase_id: 0,
+        project_construction_category_id: 0,
+        energy_code_id: 0,
+        has_subtypes: false,
+        project_id: "00000000-0000-0000-0000-000000000000",
+        use_type_total_area: 0,
+        total_energy: 0,
+        climate_zone: '',
+      }));
 
       console.log("Updated uploads with proper year initialization:", updatedUploads);
+      console.log("Failed upload records:", failedUploadRecords);
 
-      setUploads([...updatedUploads]);
+      const allRecords = [...updatedUploads, ...failedUploadRecords];
+      setUploads(allRecords);
 
       const updatedBaselineFiles = Array.isArray(data.unmatched_baseline_files)
         ? data.unmatched_baseline_files.map((file: any) => ({
@@ -192,7 +225,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
           }))
         : [];
       setBaselineFiles([...updatedBaselineFiles]);
-      setInitialValues({ records: [...updatedUploads] });
+      setInitialValues({ records: allRecords });
     } else {
       setUploads([]);
       setBaselineFiles([]);
@@ -364,7 +397,23 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                           ) : (
                             <FileDropzone
                               onUploadStatusChange={(status, response) => {
-                                if (status === "done") {
+                                if (status === "done" || status === "warning") {
+                                  // Check if this is a failed upload that allows form completion
+                                  if (status === "warning" && response && response.status === 'error' && response.allow_form_completion) {
+                                    // Failed upload - mark as attempted but don't set id
+                                    setFieldValue(
+                                      `records.${index}.upload_attempted`,
+                                      true
+                                    );
+                                    if (response.file_name) {
+                                      setFieldValue(
+                                        `records.${index}.file_name`,
+                                        response.file_name
+                                      );
+                                    }
+                                    return;
+                                  }
+                                  
                                   // Check if this is a PRM report (report_type 8)
                                   if (response.report_type === 8) {
                                     // For PRM reports, we get both baseline and design data
@@ -520,7 +569,23 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                       status,
                                       response
                                     ) => {
-                                      if (status === "done") {
+                                      if (status === "done" || status === "warning") {
+                                        // Check if this is a failed upload that allows form completion
+                                        if (status === "warning" && response && response.status === 'error' && response.allow_form_completion) {
+                                          // Failed upload - mark baseline as attempted but don't set id
+                                          const currentBaseline = values.records[selectedRecordIndex].baseline_file_data || {};
+                                          setFieldValue(
+                                            `records.${selectedRecordIndex}.baseline_file_data`,
+                                            {
+                                              ...currentBaseline,
+                                              upload_attempted: true,
+                                              file_name: response.file_name || currentBaseline.file_name
+                                            }
+                                          );
+                                          handleClose();
+                                          return;
+                                        }
+                                        
                                         // Check if this is a PRM report (report_type 8)
                                         if (response.report_type === 8) {
                                           // For PRM reports, use baseline data for baseline field
@@ -782,7 +847,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                               !values.records[index]
                                 .project_construction_category_id ||
                               !values.records[index].energy_code_id ||
-                              !values.records[index].id
+                              (!values.records[index].id && !values.records[index].upload_attempted && !values.records[index].baseline_file_data?.upload_attempted)
                             }
                           >
                             Submit

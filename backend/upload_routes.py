@@ -4,7 +4,7 @@ import models
 from utils import verify_token, add_event_history, supabase
 from typing import Optional, Dict, Union
 from uuid import uuid4
-from gcs_upload import upload_blob
+from gcs_upload import upload_blob, get_signed_url_from_url
 import os
 from multi_upload import process_multi_upload
 import logging_start
@@ -13,11 +13,141 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 import tempfile
+from google.cloud import storage
 
 from post_processing import run_script_master
 
 
 router = APIRouter()
+
+def get_upload_status_id(status_name: str) -> Optional[int]:
+    """Get upload status ID from enum_upload_statuses table"""
+    try:
+        data, _ = supabase.table('enum_upload_statuses')\
+            .select('id')\
+            .eq('name', status_name)\
+            .limit(1)\
+            .execute()
+        if data and len(data) > 1 and data[1]:
+            return data[1][0]['id']
+    except Exception as e:
+        logging_start.logger.error(f"Error getting upload status ID: {e}")
+    return None
+
+def get_user_email(user_id: str) -> Optional[str]:
+    """Get user email from profiles table"""
+    try:
+        data, _ = supabase.table('profiles')\
+            .select('email')\
+            .eq('id', user_id)\
+            .limit(1)\
+            .execute()
+        if data and len(data) > 1 and data[1]:
+            return data[1][0].get('email')
+    except Exception as e:
+        logging_start.logger.error(f"Error getting user email: {e}")
+    return None
+
+def move_file_to_failed_folder(original_url: str, file_name: str) -> Optional[str]:
+    """Move file from report_uploads/ to failed_uploads/ folder in GCS"""
+    try:
+        BUCKET_NAME = os.environ.get('BUCKET_NAME')
+        if not BUCKET_NAME:
+            return None
+        
+        # Parse the original URL to get blob name
+        from urllib.parse import urlparse
+        parsed = urlparse(original_url)
+        # Extract blob name from path (remove leading /)
+        original_blob_name = parsed.path.lstrip('/')
+        
+        # Extract just the filename part (after report_uploads/)
+        if 'report_uploads/' in original_blob_name:
+            filename_part = original_blob_name.split('report_uploads/')[1]
+        else:
+            filename_part = file_name
+        
+        # New blob name in failed_uploads folder
+        new_blob_name = f'failed_uploads/{filename_part}'
+        
+        # Use storage client to copy and delete
+        from gcs_upload import get_signing_client
+        storage_client = get_signing_client()
+        bucket = storage_client.bucket(BUCKET_NAME)
+        
+        source_blob = bucket.blob(original_blob_name)
+        if not source_blob.exists():
+            logging_start.logger.warning(f"Source blob {original_blob_name} does not exist")
+            return None
+        
+        # Copy to new location
+        new_blob = bucket.copy_blob(source_blob, bucket, new_blob_name)
+        
+        # Delete original
+        source_blob.delete()
+        
+        # Generate signed URL for new location
+        from datetime import timedelta
+        url = new_blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(hours=1),
+            method="GET",
+        )
+        
+        logging_start.logger.info(f"File moved from {original_blob_name} to {new_blob_name}")
+        return url
+        
+    except Exception as e:
+        logging_start.logger.error(f"Error moving file to failed folder: {e}")
+        # If move fails, return original URL so we still have a reference
+        return original_url
+
+def create_failed_upload_record(
+    file_url: str,
+    file_name: str,
+    error_message: str,
+    user_id: str,
+    company_id: str,
+    baseline_design: Optional[str] = None,
+    report_type_id: Optional[int] = None
+) -> Optional[int]:
+    """Create an upload record with failed status"""
+    try:
+        failed_status_id = get_upload_status_id('failed')
+        if not failed_status_id:
+            logging_start.logger.error("Failed status not found in enum_upload_statuses")
+            return None
+        
+        upload_data = {
+            'file_url': file_url,
+            'file_name': file_name,
+            'processing_error': error_message,
+            'upload_status_id': failed_status_id,
+            'user_id': user_id,
+            'company_id': company_id,
+            'notified_admin': False,
+            'notified_user_complete': False
+        }
+        
+        if baseline_design:
+            upload_data['baseline_status' if baseline_design == 'baseline' else 'design_status'] = 'failed'
+            upload_data['design_baseline_type'] = baseline_design
+        
+        if report_type_id:
+            upload_data['report_type_id'] = report_type_id
+        
+        data, _ = supabase.table('uploads')\
+            .insert(upload_data)\
+            .execute()
+        
+        if data and len(data) > 1 and data[1]:
+            upload_id = data[1][0]['id']
+            logging_start.logger.info(f"Created failed upload record {upload_id}")
+            return upload_id
+            
+    except Exception as e:
+        logging_start.logger.error(f"Error creating failed upload record: {e}")
+    return None
 
 def update_eeu_record(eeu_id, upload_id):
             eeu_data_dict  = dict()
@@ -34,7 +164,7 @@ def update_eeu_record(eeu_id, upload_id):
                 return "error eeu table"
             return "success"
 
-def upload_report(url, baseline_design, report_type=None, conditioned_area=None, file_extension=None, file_name=None):
+def upload_report(url, baseline_design, report_type=None, conditioned_area=None, file_extension=None, file_name=None, user_id=None, company_id=None):
     print(f"DEBUG: upload_report called with url={url}, baseline_design={baseline_design}, report_type={report_type}, file_extension={file_extension}")
     
     # Check if this is a multi-project Excel file BEFORE running script master
@@ -91,9 +221,27 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
             print(f"ERROR: Processing failed with status: {status}, errors: {errors}")
             errors_flat = [item for sublist in errors for item in sublist] if errors and len(errors) > 0 and isinstance(errors[0], list) else errors
             warnings_flat = [item for sublist in warnings for item in sublist] if warnings and len(warnings) > 0 and isinstance(warnings[0], list) else warnings
+            error_msg = '\n'.join(errors_flat) if errors_flat else f'File processing failed with status: {status}'
+            # If user_id and company_id provided, create failed upload record
+            if user_id and company_id:
+                logging_start.logger.info(f"Creating failed upload record for file {file_name}, user_id: {user_id}, company_id: {company_id}")
+                failed_url = move_file_to_failed_folder(url, file_name)
+                if failed_url:
+                    upload_id = create_failed_upload_record(
+                        failed_url, file_name, error_msg, user_id, company_id,
+                        baseline_design, report_type
+                    )
+                    if upload_id:
+                        logging_start.logger.info(f"Successfully created failed upload record {upload_id}")
+                    else:
+                        logging_start.logger.error(f"Failed to create upload record for {file_name}")
+                else:
+                    logging_start.logger.error(f"Failed to move file {file_name} to failed_uploads folder")
+            else:
+                logging_start.logger.warning(f"Not creating failed upload record - missing user_id or company_id. user_id: {user_id}, company_id: {company_id}")
             return {
                 'status': 'error',
-                'errors': '\n'.join(errors_flat) if errors_flat else '',
+                'errors': error_msg,
                 'warnings': '\n'.join(warnings_flat) if warnings_flat else '',
                 'message': f'File processing failed with status: {status}'
             }
@@ -102,10 +250,19 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
         # Dictionary format: {"status": "success", "df": df, "errors": [], "warnings": [], "report_type": int}
         if results.get('status') != 'success':
             print(f"ERROR: Results status is not success: {results.get('status')}")
+            error_msg = str(results.get('errors', []))
+            # If user_id and company_id provided, create failed upload record
+            if user_id and company_id:
+                failed_url = move_file_to_failed_folder(url, file_name)
+                if failed_url:
+                    create_failed_upload_record(
+                        failed_url, file_name, error_msg, user_id, company_id,
+                        baseline_design, report_type
+                    )
             return {
                 'status': 'error',
                 'message': 'File processing failed',
-                'errors': str(results.get('errors', [])),
+                'errors': error_msg,
                 'warnings': str(results.get('warnings', []))
             }
         
@@ -115,9 +272,18 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
     # Ensure we have a dataframe to work with
     if isinstance(results, list) or 'df' not in results:
         print(f"ERROR: No valid dataframe found in results: {results}")
+        error_msg = 'No valid data found in file'
+        # If user_id and company_id provided, create failed upload record
+        if user_id and company_id:
+            failed_url = move_file_to_failed_folder(url, file_name)
+            if failed_url:
+                create_failed_upload_record(
+                    failed_url, file_name, error_msg, user_id, company_id,
+                    baseline_design, report_type
+                )
         return {
             'status': 'error',
-            'message': 'No valid data found in file',
+            'message': error_msg,
             'errors': str(errors) if 'errors' in locals() else '',
             'warnings': str(warnings) if 'warnings' in locals() else ''
         }
@@ -170,7 +336,21 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
     except Exception as e:
         print(f"ERROR: Database insertion failed: {e}")
         print(f"ERROR: Data that failed to insert: {eeu_data_to_insert}")
-        return "error"
+        error_msg = f"Database insertion failed: {str(e)}"
+        # If user_id and company_id provided, create failed upload record
+        if user_id and company_id:
+            failed_url = move_file_to_failed_folder(url, file_name)
+            if failed_url:
+                create_failed_upload_record(
+                    failed_url, file_name, error_msg, user_id, company_id,
+                    baseline_design, results.get('report_type')
+                )
+        return {
+            'status': 'error',
+            'errors': error_msg,
+            'warnings': warnings_str,
+            'message': 'File processing failed during database insertion'
+        }
     avg_energy = float(eeu_data_to_insert[0]['total_energy'])*1000 / float(eeu_data_to_insert[0]['use_type_total_area'])
 
     return {'status': "success",
@@ -211,19 +391,30 @@ async def create_upload_file(item: models.ReportUpload = Depends(), authorized: 
         #if item.report_type == 8:
         if hasattr(item, 'report_type') and item.report_type == 8:
             report_type = item.report_type
-            baseline_output = upload_report(url,"baseline",report_type,file_extension=file_extension,file_name = file_name)
-            design_output = upload_report(url,"design",report_type,file_extension=file_extension, file_name = file_name)
-            return {'report_type':report_type,
-                'baseline':baseline_output,
-                    'design':design_output}
+            user_id = authorized.get('user_id')
+            company_id = authorized.get('company_id')
+            baseline_output = upload_report(url,"baseline",report_type,file_extension=file_extension,file_name = file_name, user_id=user_id, company_id=company_id)
+            design_output = upload_report(url,"design",report_type,file_extension=file_extension, file_name = file_name, user_id=user_id, company_id=company_id)
+            
+            # Handle partial failures - if one side fails, still allow form completion
+            response = {'report_type': report_type, 'baseline': baseline_output, 'design': design_output}
+            if baseline_output.get('status') == 'error' or design_output.get('status') == 'error':
+                response['allow_form_completion'] = True
+                response['message'] = 'One or both sides could not be processed automatically. You can still complete the form below.'
+            
+            return response
 
         else:
+            user_id = authorized.get('user_id')
+            company_id = authorized.get('company_id')
             args = {
                 'url': url,
                 'baseline_design': item.baseline_design,
                 'conditioned_area': item.conditioned_area,
                 'file_extension': file_extension,
-                'file_name': file_name
+                'file_name': file_name,
+                'user_id': user_id,
+                'company_id': company_id
             }
             if hasattr(item, 'report_type') and item.report_type is not None:
                 args['report_type'] = item.report_type
@@ -238,12 +429,32 @@ async def create_upload_file(item: models.ReportUpload = Depends(), authorized: 
                 report_to_upload.get('report_type') == 8):  # PRM report
                 
                 # Process both baseline and design for PRM reports
-                baseline_output = upload_report(url, "baseline", report_type=8, file_extension=file_extension, file_name=file_name)
-                design_output = upload_report(url, "design", report_type=8, file_extension=file_extension, file_name=file_name)
-                return {
+                baseline_output = upload_report(url, "baseline", report_type=8, file_extension=file_extension, file_name=file_name, user_id=user_id, company_id=company_id)
+                design_output = upload_report(url, "design", report_type=8, file_extension=file_extension, file_name=file_name, user_id=user_id, company_id=company_id)
+                
+                # Handle partial failures - if one side fails, still allow form completion
+                response = {
                     'report_type': 8,
                     'baseline': baseline_output,
                     'design': design_output
+                }
+                if baseline_output.get('status') == 'error' or design_output.get('status') == 'error':
+                    response['allow_form_completion'] = True
+                    response['message'] = 'One or both sides could not be processed automatically. You can still complete the form below.'
+                
+                return response
+            
+            # Handle failed uploads - return error but allow form completion
+            if isinstance(report_to_upload, dict) and report_to_upload.get('status') == 'error':
+                # Return error response but indicate form can still be completed
+                return {
+                    'status': 'error',
+                    'message': 'File could not be processed automatically. You can still complete the form below. We\'ll notify you when processing is complete.',
+                    'errors': report_to_upload.get('errors', ''),
+                    'warnings': report_to_upload.get('warnings', ''),
+                    'file_url': url,
+                    'file_name': file_name,
+                    'allow_form_completion': True
                 }
             
             # Check if the parsed report type is Multi-Project Excel (type 9)
@@ -559,12 +770,20 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
     
 
     if authorized['is_authorized']:
-    
+        user_id = authorized.get('user_id')
+        company_id = authorized.get('company_id')
+        
         # Convert the item to a dictionary
         item_data = item.model_dump()
         
         item_data.setdefault('design_eeu_id', None)
         item_data.setdefault('energy_code_id', None)
+        
+        # Always set company_id (user_id is bigint in uploads table, but we have UUID from auth)
+        # The user_id field in uploads references the old users table, so we'll leave it NULL
+        # and rely on company_id for filtering
+        item_data['company_id'] = company_id
+        # Don't set user_id - it's a bigint foreign key to users table, not UUID from auth
 
         extract_dict = {}
 
@@ -574,14 +793,133 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
         if 'design_eeu_id' in item_data:
             extract_dict['design_eeu_id'] = item_data.pop('design_eeu_id')
         
+        # Check for failed uploads that need admin notification and potentially update
+        failed_upload_id = None
+        try:
+            failed_status_id = get_upload_status_id('failed')
+            if failed_status_id:
+                # Look for a recent failed upload that matches this submission
+                # (within last 24 hours, same user/company, no project_id yet)
+                from datetime import datetime, timedelta
+                recent_time = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+                
+                # Note: user_id in uploads is bigint, but we have UUID from auth, so filter by company_id only
+                failed_uploads_query = supabase.table('uploads')\
+                    .select('id, file_name, processing_error, baseline_status, design_status, notified_admin, project_id')\
+                    .eq('upload_status_id', failed_status_id)\
+                    .eq('company_id', company_id)\
+                    .is_('project_id', 'null')\
+                    .gte('created_at', recent_time)\
+                    .order('created_at', desc=True)\
+                    .limit(1)
+                
+                failed_uploads_data, _ = failed_uploads_query.execute()
+                
+                # If we found a matching failed upload, update it instead of creating new
+                if failed_uploads_data and len(failed_uploads_data) > 1 and failed_uploads_data[1]:
+                    failed_upload = failed_uploads_data[1][0]
+                    failed_upload_id = failed_upload['id']
+                    
+                    # Update the failed upload record with the new data
+                    # Set status to pending since user has now provided project details
+                    # Preserve file_name and file_url from the original failed upload
+                    pending_status_id = get_upload_status_id('pending')
+                    update_data = {
+                        **item_data,
+                        'upload_status_id': pending_status_id if pending_status_id else failed_status_id,
+                        'processing_error': None,  # Clear error since user is trying again
+                        # Preserve file info from original failed upload
+                        'file_name': failed_upload.get('file_name') or item_data.get('file_name'),
+                        'file_url': failed_upload.get('file_url') or item_data.get('file_url')
+                    }
+                    
+                    supabase.table('uploads')\
+                        .update(update_data)\
+                        .eq('id', failed_upload_id)\
+                        .execute()
+                    
+                    logging_start.logger.info(f"Updated existing failed upload {failed_upload_id} with project details")
+                
+                # Send notifications for any failed uploads that haven't been notified yet
+                # Note: user_id in uploads is bigint, but we have UUID from auth, so filter by company_id only
+                all_failed_query = supabase.table('uploads')\
+                    .select('id, file_name, processing_error, baseline_status, design_status, notified_admin')\
+                    .eq('upload_status_id', failed_status_id)\
+                    .eq('company_id', company_id)\
+                    .eq('notified_admin', False)
+                
+                all_failed_data, _ = all_failed_query.execute()
+                
+                if all_failed_data and len(all_failed_data) > 1:
+                    user_email = get_user_email(user_id)
+                    # Get company name
+                    company_name = None
+                    try:
+                        company_data, _ = supabase.table('companies')\
+                            .select('company_name')\
+                            .eq('id', company_id)\
+                            .limit(1)\
+                            .execute()
+                        if company_data and len(company_data) > 1 and company_data[1]:
+                            company_name = company_data[1][0].get('company_name')
+                    except:
+                        pass
+                    
+                    for failed_upload in all_failed_data[1]:
+                        # Skip if this is the one we just updated
+                        if failed_upload['id'] == failed_upload_id:
+                            continue
+                            
+                        baseline_design = None
+                        if failed_upload.get('baseline_status') == 'failed':
+                            baseline_design = 'baseline'
+                        elif failed_upload.get('design_status') == 'failed':
+                            baseline_design = 'design'
+                        
+                        from email_service import send_failed_upload_notification_to_admin
+                        send_failed_upload_notification_to_admin(
+                            failed_upload['id'],
+                            user_email or 'unknown',
+                            failed_upload.get('file_name', 'unknown'),
+                            failed_upload.get('processing_error', 'Unknown error'),
+                            baseline_design,
+                            company_name
+                        )
+                        
+                        # Mark as notified
+                        supabase.table('uploads')\
+                            .update({'notified_admin': True})\
+                            .eq('id', failed_upload['id'])\
+                            .execute()
+        except Exception as e:
+            logging_start.logger.error(f"Error checking failed uploads: {e}")
 
         try:
-            data, count = supabase.table('uploads')\
-                .insert(item_data)\
-                .execute()
+            # If we updated an existing failed upload, use that ID; otherwise create new
+            if failed_upload_id:
+                data = (None, [{'id': failed_upload_id}])
+            else:
+                # For new uploads, set status to pending if no eeu_ids provided (file processing pending)
+                # or completed if eeu_ids are provided (file already processed)
+                if not extract_dict.get('baseline_eeu_id') and not extract_dict.get('design_eeu_id'):
+                    pending_status_id = get_upload_status_id('pending')
+                    if pending_status_id:
+                        item_data['upload_status_id'] = pending_status_id
+                else:
+                    completed_status_id = get_upload_status_id('completed')
+                    if completed_status_id:
+                        item_data['upload_status_id'] = completed_status_id
+                
+                logging_start.logger.info(f"Inserting upload record with data: {item_data}")
+                data, count = supabase.table('uploads')\
+                    .insert(item_data)\
+                    .execute()
+                logging_start.logger.info(f"Successfully inserted upload record: {data[1][0]['id'] if data and len(data) > 1 and data[1] else 'No data returned'}")
         except Exception as e:
-            print(e)
-            return "error upload table"
+            error_msg = f"Error inserting upload record: {str(e)}"
+            logging_start.logger.error(error_msg, exc_info=True)
+            print(error_msg)
+            return {"error": error_msg, "status": "failed"}
         
         def update_eeu_if_exists(key, extract_dict, upload_id):
             if extract_dict.get(key) is not None:
@@ -591,9 +929,17 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
                 }
                 update_eeu_record(eeu_data_dict['id'], eeu_data_dict['upload_id'])
 
-        # Usage
-        update_eeu_if_exists('baseline_eeu_id', extract_dict, data[1][0]['id'])
-        update_eeu_if_exists('design_eeu_id', extract_dict, data[1][0]['id'])
+        # Usage - only update if eeu_ids exist (may be null for failed uploads)
+        if not data or len(data) <= 1 or not data[1]:
+            error_msg = "No upload record returned after insert/update"
+            logging_start.logger.error(error_msg)
+            return {"error": error_msg, "status": "failed"}
+            
+        upload_id = data[1][0]['id']
+        update_eeu_if_exists('baseline_eeu_id', extract_dict, upload_id)
+        update_eeu_if_exists('design_eeu_id', extract_dict, upload_id)
+        
+        logging_start.logger.info(f"Successfully created/updated upload {upload_id} for project {item_data.get('project_id')}")
 
         return "success"
 

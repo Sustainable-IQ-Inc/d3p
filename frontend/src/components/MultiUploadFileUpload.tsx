@@ -19,6 +19,7 @@ export default function MultiUploadFileUpload({
   const [errorIndex] = useState<number | null>(null);
   const [designFiles, setDesignFiles] = useState<any>([]);
   const [baselineFiles, setBaselineFiles] = useState<any>([]);
+  const [failedUploads, setFailedUploads] = useState<any>([]);
   const [uploadData, setUploadData] = useState(null);
   const [uploadCount, setUploadCount] = useState(0);
   const steps = [
@@ -44,6 +45,11 @@ export default function MultiUploadFileUpload({
     try {
       const response = await submitMultiUpload({ uploadProps });
       
+      // Add failed uploads info to the response
+      if (failedUploads.length > 0) {
+        response.failed_uploads = failedUploads;
+      }
+      
       setUploadData(response);
       onUploadDataChange(response);
     } catch (error) {
@@ -58,35 +64,51 @@ export default function MultiUploadFileUpload({
   ) => {
     
     
-    if (response && status === "done") {
+    if (response && (status === "done" || status === "warning")) {
       // Check if this is a PRM report (report_type 8)
       if (response.report_type === 8) {
         // For PRM reports, we get both baseline and design data
         const baselineData = response.baseline;
         const designData = response.design;
         
-        // Add both baseline and design IDs regardless of source
-        // since PRM contains both
-        setDesignFiles((prevDesignFiles: any) => [
-          ...prevDesignFiles,
-          designData.eeu_id,
-        ]);
-        setBaselineFiles((prevBaselineFiles: any) => [
-          ...prevBaselineFiles,
-          baselineData.eeu_id,
-        ]);
-      } else {
-        // Handle regular reports (non-PRM)
-        if (source === "design") {
+        // Add IDs if successful
+        if (designData.eeu_id) {
           setDesignFiles((prevDesignFiles: any) => [
             ...prevDesignFiles,
-            response.eeu_id,
+            designData.eeu_id,
           ]);
-        } else if (source === "baseline") {
+        } else if (designData.status === 'error') {
+          // Track failed upload
+          setFailedUploads((prev: any) => [...prev, { source: 'design', response: designData }]);
+        }
+        
+        if (baselineData.eeu_id) {
           setBaselineFiles((prevBaselineFiles: any) => [
             ...prevBaselineFiles,
-            response.eeu_id,
+            baselineData.eeu_id,
           ]);
+        } else if (baselineData.status === 'error') {
+          // Track failed upload
+          setFailedUploads((prev: any) => [...prev, { source: 'baseline', response: baselineData }]);
+        }
+      } else {
+        // Handle regular reports (non-PRM)
+        if (response.eeu_id) {
+          // Successful upload
+          if (source === "design") {
+            setDesignFiles((prevDesignFiles: any) => [
+              ...prevDesignFiles,
+              response.eeu_id,
+            ]);
+          } else if (source === "baseline") {
+            setBaselineFiles((prevBaselineFiles: any) => [
+              ...prevBaselineFiles,
+              response.eeu_id,
+            ]);
+          }
+        } else if (response.status === 'error' && response.allow_form_completion) {
+          // Failed upload that allows form completion
+          setFailedUploads((prev: any) => [...prev, { source, response, file_name: response.file_name }]);
         }
       }
     }
