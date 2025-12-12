@@ -63,7 +63,6 @@ def process_prm_table(df,prm_baseline_design):
         raise ValueError(f"Missing required columns: {missing_cols}")
     
     df=df[all_cols]
-    print(df)
     for i in range(len(df)):
         try:
             design_val = str(df.iloc[i,df.columns.get_loc('design_value')])
@@ -141,19 +140,13 @@ def parse_report_iesve_prm(url,baseline_design):
             found_text_1= txt.find("Space Summary")
             found_text_2= txt.find("Building Use")
             if(page_no_to_use_sf==-999 and found_text_1!=-1 and found_text_2!=-1):
-            
                 page_no_to_use_sf=i
 
             ##Find page with the table that contains the Design and Baseline values
             found_text_3 = txt.find("Performance Rating Table - PRM Compliance")
             #found_text_4 = txt.find("Total Annual Energy Use")
 
-
-
-
-
             if(found_text_3!=-1):
-            
                 page_no_to_use_main_table=i
                 ##  look in the page after the main table for the next section header, if it's not there, then it's a two page table
                 
@@ -295,11 +288,17 @@ def parse_report_iesve_prm(url,baseline_design):
                 raise ValueError(error_msg)
             
             all_weather_text=page_to_use_weather.extract_text()
-            weather_bottom_text="zone:"
-            weather_bottom_loc= page_to_use_weather.search(weather_bottom_text,x_tolerance=3, y_tolerance=3,case=False)
+            # Try multiple variations of the bottom marker
+            weather_bottom_loc = None
+            weather_bottom_text = None
+            for bottom_text in ["zone:", "Climate zone:"]:
+                weather_bottom_loc = page_to_use_weather.search(bottom_text, x_tolerance=3, y_tolerance=3, case=False)
+                if weather_bottom_loc and len(weather_bottom_loc) > 0:
+                    weather_bottom_text = bottom_text
+                    break
             
             if not weather_bottom_loc or len(weather_bottom_loc) == 0:
-                error_msg = "Could not locate weather data - missing 'zone:' marker"
+                error_msg = "Could not locate weather data - missing 'zone:' or 'Climate zone:' marker"
                 printer(f"Error: {error_msg}")
                 raise ValueError(error_msg)
 
@@ -316,21 +315,32 @@ def parse_report_iesve_prm(url,baseline_design):
         weather_table = page_to_use_weather.crop((left_weather,top_weather,right_weather,bottom_weather),relative=True)
         data_weather=weather_table.extract_table(table_settings_weather)
         
-        # Validate that we extracted weather table data
-        if not data_weather or len(data_weather) == 0:
-            error_msg = "Could not extract weather table from PDF"
+        # If table extraction fails, try extracting text directly
+        weather_string = None
+        if not data_weather or len(data_weather) == 0 or (len(data_weather) > 0 and len(data_weather[0]) == 0):
+            # Fall back to text extraction
+            weather_text = weather_table.extract_text()
+            if weather_text:
+                # Remove the "Weather file" prefix and any trailing "Climate zone:" text
+                weather_text_clean = weather_text.replace(weather_loc_text, "").strip()
+                # Remove any trailing "Climate zone:" or "zone:" text
+                for suffix in ["Climate zone:", "zone:"]:
+                    if weather_text_clean.endswith(suffix):
+                        weather_text_clean = weather_text_clean[:-len(suffix)].strip()
+                weather_string = weather_text_clean
+        else:
+            # Use table extraction method (original behavior)
+            data_weather=data_weather[0][0]
+            weather_string = data_weather[len(weather_loc_text):]
+        
+        # Validate that we extracted weather string
+        if not weather_string or weather_string.strip() == "":
+            error_msg = "Could not extract weather string from PDF"
             printer(f"Error: {error_msg}")
             raise ValueError(error_msg)
         
-        if len(data_weather[0]) == 0:
-            error_msg = "Weather table is empty"
-            printer(f"Error: {error_msg}")
-            raise ValueError(error_msg)
-            
-        data_weather=data_weather[0][0]
-        
-
-        weather_string = data_weather[len(weather_loc_text):]
+        # Clean up the weather string (remove extra whitespace, newlines, etc.)
+        weather_string = ' '.join(weather_string.split())
 
 
 
