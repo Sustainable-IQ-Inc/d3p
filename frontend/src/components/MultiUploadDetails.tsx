@@ -738,7 +738,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                       <WarningAmberIcon style={{ color: "#ff9800", fontSize: "24px" }} />
                                     </Tooltip>
                                     <Typography variant="body1" style={{ color: "#e65100", fontWeight: 500 }}>
-                                      {values.records[index].baseline_file_data.file_name}
+                                      {values.records[index].baseline_file_data?.file_name}
                                     </Typography>
                                   </div>
                                   <Typography variant="caption" style={{ color: "#bf360c", marginTop: "4px", display: "block" }}>
