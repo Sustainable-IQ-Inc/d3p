@@ -13,6 +13,17 @@ logger=logging.getLogger()
 #Now we are going to Set the threshold of logger to DEBUG 
 logger.setLevel(logging.DEBUG) 
 
+logging.getLogger('pdfplumber').setLevel(logging.WARNING)
+logging.getLogger('pdfminer').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.pdfparser').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.pdfdocument').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.pdfpage').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.pdfinterp').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.converter').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.cmapdb').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.layout').setLevel(logging.WARNING) 
+
+
 # Check if we're running locally
 env = os.environ.get('ENV', 'local').lower()
 is_local = env == 'local' or os.environ.get('env_use', '').lower() == 'local'
