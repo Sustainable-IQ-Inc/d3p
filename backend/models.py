@@ -22,14 +22,16 @@ class SubmitProject(BaseModel):
     project_use_type_id: int
     project_phase_id: int
     project_construction_category_id: int
-    baseline_eeu_id: Optional[int]
-    design_eeu_id: Optional[int]
+    baseline_eeu_id: Optional[int] = None
+    design_eeu_id: Optional[int] = None
     project_id: str
-    energy_code_id: Optional[int]
-    use_type_subtype_id: Optional[int]
+    energy_code_id: Optional[int] = None
+    use_type_subtype_id: Optional[int] = None
     #other_energy_code: Optional[str]
-    year: Optional[int]  # occupancy_year
-    reporting_year: Optional[int]
+    year: Optional[int] = None  # occupancy_year
+    reporting_year: Optional[int] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
 
 class CreateCompany(BaseModel):
     company_name: str

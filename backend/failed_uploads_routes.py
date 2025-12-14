@@ -141,12 +141,153 @@ async def get_failed_uploads(authorized: Dict[str, Union[bool, Optional[str]]] =
 async def download_failed_file(upload_id: int, authorized: Dict[str, Union[bool, Optional[str]]] = Depends(verify_token)):
     """Get signed URL to download failed file"""
     if not authorized['is_authorized'] or authorized.get('role') != 'superadmin':
+        logging_start.logger.warning(f"Unauthorized download attempt for upload_id: {upload_id}")
         return {"error": "not authorized"}
     
     try:
-        # Get upload record
+        logging_start.logger.info(f"Download request for upload_id: {upload_id}")
+        # Get upload record - need baseline_eeu_id and design_eeu_id to find file in eeu_data
         upload_data, _ = supabase.table('uploads')\
-            .select('file_url, file_name')\
+            .select('file_url, file_name, project_id, created_at, upload_status_id, design_baseline_type')\
+            .eq('id', upload_id)\
+            .limit(1)\
+            .execute()
+        
+        if not upload_data or len(upload_data) <= 1 or not upload_data[1]:
+            logging_start.logger.warning(f"Upload not found: {upload_id}")
+            raise HTTPException(status_code=404, detail="Upload not found")
+        
+        upload_record = upload_data[1][0]
+        file_url = upload_record.get('file_url')
+        file_name = upload_record.get('file_name')
+        project_id = upload_record.get('project_id')
+        design_baseline_type = upload_record.get('design_baseline_type')
+        logging_start.logger.info(f"Found upload {upload_id}, file_url present: {bool(file_url)}, file_name: {file_name}, project_id: {project_id}, type: {design_baseline_type}")
+        
+        # Check if file_url is None or empty string
+        if not file_url or (isinstance(file_url, str) and not file_url.strip()):
+            # For all uploads, file_url is stored in eeu_data table
+            # eeu_data has upload_id pointing back to uploads
+            try:
+                eeu_data, _ = supabase.table('eeu_data')\
+                    .select('file_url, file_name')\
+                    .eq('upload_id', upload_id)\
+                    .execute()
+                if eeu_data and len(eeu_data) > 1 and eeu_data[1]:
+                    # Get the first eeu_data record with a file_url
+                    for eeu_record in eeu_data[1]:
+                        if eeu_record.get('file_url'):
+                            file_url = eeu_record.get('file_url')
+                            if not file_name and eeu_record.get('file_name'):
+                                file_name = eeu_record.get('file_name')
+                            logging_start.logger.info(f"Found file_url in eeu_data for upload_id: {upload_id}")
+                            break
+            except Exception as e:
+                logging_start.logger.warning(f"Error checking eeu_data for upload_id {upload_id}: {e}")
+            
+            if not file_url:
+                error_msg = f"File URL not found for upload {upload_id}. This upload may have been created without a file, or the file may have been deleted."
+                logging_start.logger.error(error_msg)
+                raise HTTPException(status_code=404, detail=error_msg)
+        
+        # Use a default file_name if still missing
+        if not file_name:
+            file_name = f"upload_{upload_id}_file"
+        
+        # Generate signed URL
+        # Parse URL to get blob name first
+        parsed = urlparse(file_url)
+        path = parsed.path.lstrip('/')
+        logging_start.logger.info(f"Parsed file_url path: {path}, netloc: {parsed.netloc}")
+        
+        BUCKET_NAME = os.environ.get('BUCKET_NAME')
+        
+        # Handle different GCS URL formats:
+        # 1. https://storage.googleapis.com/BUCKET_NAME/blob/path
+        # 2. https://storage.googleapis.com/BUCKET_NAME/blob/path?signature=...
+        # 3. /BUCKET_NAME/blob/path (from signed URLs)
+        # 4. BUCKET_NAME/blob/path (already parsed)
+        
+        # If the netloc is storage.googleapis.com, the path is /BUCKET_NAME/blob/path
+        if parsed.netloc == 'storage.googleapis.com' or parsed.netloc.endswith('.storage.googleapis.com'):
+            # Path format: /BUCKET_NAME/blob/path
+            # Remove leading / and extract blob path after bucket name
+            path_parts = path.split('/', 1)
+            if len(path_parts) > 1:
+                # First part is bucket name, second part is blob path
+                blob_name = path_parts[1]
+            else:
+                blob_name = path
+        elif BUCKET_NAME and path.startswith(BUCKET_NAME + '/'):
+            # Path already includes bucket name at start
+            blob_name = path[len(BUCKET_NAME) + 1:]
+        elif '/' in path:
+            # Try to extract blob path - assume first part might be bucket name
+            parts = path.split('/', 1)
+            if len(parts) > 1:
+                # Check if first part looks like a bucket name
+                first_part = parts[0]
+                # If it contains dashes and no dots, likely a bucket name
+                if '-' in first_part and '.' not in first_part and first_part != 'report_uploads' and first_part != 'failed_uploads':
+                    blob_name = parts[1]  # Second part is blob path
+                else:
+                    # First part is part of the blob path
+                    blob_name = path
+            else:
+                blob_name = path
+        else:
+            blob_name = path
+        
+        logging_start.logger.info(f"Extracted blob_name: {blob_name}")
+        
+        # Final cleanup: if blob_name still starts with bucket name, remove it
+        if BUCKET_NAME and blob_name.startswith(BUCKET_NAME + '/'):
+            blob_name = blob_name[len(BUCKET_NAME) + 1:]
+            logging_start.logger.info(f"Removed bucket name from blob_name, new blob_name: {blob_name}")
+        
+        try:
+            # Generate new signed URL using the corrected blob name
+            signed_url = generate_signed_url(blob_name, download_as=file_name)
+            logging_start.logger.info(f"Generated signed URL successfully for upload_id: {upload_id}, blob_name: {blob_name}")
+            return {"signed_url": signed_url, "file_name": file_name}
+        except Exception as e:
+            logging_start.logger.error(f"Error generating signed URL for blob_name '{blob_name}': {e}", exc_info=True)
+            error_str = str(e)
+            
+            # If NoSuchKey error, the file might not exist or blob name is wrong
+            if 'NoSuchKey' in error_str or 'does not exist' in error_str.lower():
+                error_msg = f"File not found in GCS. Blob name: {blob_name}. The file may have been deleted or the file URL is incorrect."
+                logging_start.logger.error(error_msg)
+                raise HTTPException(status_code=404, detail=error_msg)
+            
+            # For other errors, return original URL as fallback
+            logging_start.logger.warning(f"Returning original URL as fallback due to error: {e}")
+            return {"signed_url": file_url, "file_name": file_name}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging_start.logger.error(f"Error downloading failed file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/admin/failed-uploads/{upload_id}/file-url")
+async def update_failed_upload_file_url(
+    upload_id: int,
+    file_url: str,
+    file_name: Optional[str] = None,
+    authorized: Dict[str, Union[bool, Optional[str]]] = Depends(verify_token)
+):
+    """Update the file_url for a failed upload (superadmin only)"""
+    if not authorized['is_authorized'] or authorized.get('role') != 'superadmin':
+        return {"error": "not authorized"}
+    
+    try:
+        logging_start.logger.info(f"Updating file_url for upload {upload_id}")
+        
+        # Verify upload exists
+        upload_data, _ = supabase.table('uploads')\
+            .select('id')\
             .eq('id', upload_id)\
             .limit(1)\
             .execute()
@@ -154,43 +295,23 @@ async def download_failed_file(upload_id: int, authorized: Dict[str, Union[bool,
         if not upload_data or len(upload_data) <= 1 or not upload_data[1]:
             raise HTTPException(status_code=404, detail="Upload not found")
         
-        file_url = upload_data[1][0].get('file_url')
-        file_name = upload_data[1][0].get('file_name', 'download')
+        # Update file_url (and optionally file_name)
+        update_data = {'file_url': file_url}
+        if file_name:
+            update_data['file_name'] = file_name
         
-        if not file_url:
-            # Try to get file_url from eeu_data if available
-            try:
-                eeu_data, _ = supabase.table('eeu_data')\
-                    .select('file_url')\
-                    .eq('upload_id', upload_id)\
-                    .limit(1)\
-                    .execute()
-                if eeu_data and len(eeu_data) > 1 and eeu_data[1]:
-                    file_url = eeu_data[1][0].get('file_url')
-            except:
-                pass
-            
-            if not file_url:
-                raise HTTPException(status_code=404, detail="File URL not found for this upload")
+        supabase.table('uploads')\
+            .update(update_data)\
+            .eq('id', upload_id)\
+            .execute()
         
-        # Generate signed URL
-        try:
-            # Parse URL to get blob name
-            parsed = urlparse(file_url)
-            blob_name = parsed.path.lstrip('/')
-            
-            # Generate new signed URL
-            signed_url = generate_signed_url(blob_name, download_as=file_name)
-            return {"signed_url": signed_url, "file_name": file_name}
-        except Exception as e:
-            logging_start.logger.error(f"Error generating signed URL: {e}")
-            # Return original URL as fallback
-            return {"signed_url": file_url, "file_name": file_name}
+        logging_start.logger.info(f"Updated file_url for upload {upload_id}")
+        return {"status": "success", "message": f"Updated file_url for upload {upload_id}"}
         
     except HTTPException:
         raise
     except Exception as e:
-        logging_start.logger.error(f"Error downloading failed file: {e}")
+        logging_start.logger.error(f"Error updating file_url for upload {upload_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

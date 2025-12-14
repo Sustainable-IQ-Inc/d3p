@@ -53,6 +53,15 @@ on:
         required: false
       GCP_PROJECT_ID:
         required: false
+      # Email Configuration (common across environments)
+      SENDGRID_API_KEY:
+        required: false
+      SENDGRID_FROM_EMAIL:
+        required: false
+      TEST_EMAIL:
+        required: false
+      ADMIN_EMAILS:
+        required: false
 
 jobs:
   setup:
@@ -266,6 +275,20 @@ jobs:
           if [ -n "${{ secrets.DDX_API_BASE_URL }}" ]; then
             create_or_update_secret "${ENVIRONMENT^^}_DDX_API_BASE_URL" "${{ secrets.DDX_API_BASE_URL }}"
           fi
+          
+          # Email Configuration (common secrets, no environment prefix)
+          if [ -n "${{ secrets.SENDGRID_API_KEY }}" ]; then
+            create_or_update_secret "SENDGRID_API_KEY" "${{ secrets.SENDGRID_API_KEY }}"
+          fi
+          if [ -n "${{ secrets.SENDGRID_FROM_EMAIL }}" ]; then
+            create_or_update_secret "SENDGRID_FROM_EMAIL" "${{ secrets.SENDGRID_FROM_EMAIL }}"
+          fi
+          if [ -n "${{ secrets.TEST_EMAIL }}" ]; then
+            create_or_update_secret "TEST_EMAIL" "${{ secrets.TEST_EMAIL }}"
+          fi
+          if [ -n "${{ secrets.ADMIN_EMAILS }}" ]; then
+            create_or_update_secret "ADMIN_EMAILS" "${{ secrets.ADMIN_EMAILS }}"
+          fi
 
       - name: Configure Docker
         run: |
@@ -301,7 +324,7 @@ jobs:
           docker build -t "$IMAGE_NAME" .
           docker push $IMAGE_NAME
           
-          SECRET_REFS="SUPABASE_URL=${ENVIRONMENT^^}_SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE=${ENVIRONMENT^^}_SUPABASE_SERVICE_ROLE:latest,ENCRYPTION_KEY=${ENVIRONMENT^^}_ENCRYPTION_KEY:latest,ENCRYPTION_SALT=${ENVIRONMENT^^}_ENCRYPTION_SALT:latest,REDIRECT_URL=${ENVIRONMENT^^}_REDIRECT_URL:latest,ALLOWED_ORIGINS=${ENVIRONMENT^^}_ALLOWED_ORIGINS:latest,DDX_API_BASE_URL=${ENVIRONMENT^^}_DDX_API_BASE_URL:latest,BUCKET_NAME=${ENVIRONMENT^^}_BUCKET_NAME:latest,SIGNING_SA_CREDENTIALS_BASE64=SIGNING_SA_CREDENTIALS:latest"
+          SECRET_REFS="SUPABASE_URL=${ENVIRONMENT^^}_SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE=${ENVIRONMENT^^}_SUPABASE_SERVICE_ROLE:latest,ENCRYPTION_KEY=${ENVIRONMENT^^}_ENCRYPTION_KEY:latest,ENCRYPTION_SALT=${ENVIRONMENT^^}_ENCRYPTION_SALT:latest,REDIRECT_URL=${ENVIRONMENT^^}_REDIRECT_URL:latest,ALLOWED_ORIGINS=${ENVIRONMENT^^}_ALLOWED_ORIGINS:latest,DDX_API_BASE_URL=${ENVIRONMENT^^}_DDX_API_BASE_URL:latest,BUCKET_NAME=${ENVIRONMENT^^}_BUCKET_NAME:latest,SIGNING_SA_CREDENTIALS_BASE64=SIGNING_SA_CREDENTIALS:latest,SENDGRID_API_KEY=SENDGRID_API_KEY:latest,SENDGRID_FROM_EMAIL=SENDGRID_FROM_EMAIL:latest,TEST_EMAIL=TEST_EMAIL:latest,ADMIN_EMAILS=ADMIN_EMAILS:latest"
           
           gcloud run deploy "$SERVICE_NAME" \
             --image="$IMAGE_NAME" \

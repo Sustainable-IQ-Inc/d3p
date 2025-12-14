@@ -58,8 +58,27 @@ def move_file_to_failed_folder(original_url: str, file_name: str) -> Optional[st
         # Parse the original URL to get blob name
         from urllib.parse import urlparse
         parsed = urlparse(original_url)
-        # Extract blob name from path (remove leading /)
-        original_blob_name = parsed.path.lstrip('/')
+        path = parsed.path.lstrip('/')
+        
+        # Handle different GCS URL formats to extract blob name without bucket name
+        # 1. https://storage.googleapis.com/BUCKET_NAME/blob/path
+        # 2. /BUCKET_NAME/blob/path (from signed URLs)
+        # 3. BUCKET_NAME/blob/path (already parsed)
+        
+        if parsed.netloc == 'storage.googleapis.com' or parsed.netloc.endswith('.storage.googleapis.com'):
+            # Path format: /BUCKET_NAME/blob/path
+            path_parts = path.split('/', 1)
+            if len(path_parts) > 1:
+                original_blob_name = path_parts[1]  # Get everything after bucket name
+            else:
+                original_blob_name = path
+        elif BUCKET_NAME and path.startswith(BUCKET_NAME + '/'):
+            # Path already includes bucket name at start
+            original_blob_name = path[len(BUCKET_NAME) + 1:]
+        else:
+            original_blob_name = path
+        
+        logging_start.logger.info(f"Parsed blob name from URL: {original_blob_name}")
         
         # Extract just the filename part (after report_uploads/)
         if 'report_uploads/' in original_blob_name:
@@ -111,26 +130,30 @@ def create_failed_upload_record(
     baseline_design: Optional[str] = None,
     report_type_id: Optional[int] = None
 ) -> Optional[int]:
-    """Create an upload record with failed status"""
+    """Create an upload record with failed status and create eeu_data record with file_url"""
     try:
         failed_status_id = get_upload_status_id('failed')
         if not failed_status_id:
             logging_start.logger.error("Failed status not found in enum_upload_statuses")
             return None
         
+        # First, create the upload record
+        # Note: user_id is a UUID from auth, but uploads table may not have this field
+        # The user is tracked via the session/company_id instead
         upload_data = {
-            'file_url': file_url,
-            'file_name': file_name,
             'processing_error': error_message,
             'upload_status_id': failed_status_id,
-            'user_id': user_id,
             'company_id': company_id,
             'notified_admin': False,
             'notified_user_complete': False
         }
         
+        if baseline_design == 'baseline':
+            upload_data['baseline_status'] = 'failed'
+        elif baseline_design == 'design':
+            upload_data['design_status'] = 'failed'
+        
         if baseline_design:
-            upload_data['baseline_status' if baseline_design == 'baseline' else 'design_status'] = 'failed'
             upload_data['design_baseline_type'] = baseline_design
         
         if report_type_id:
@@ -140,13 +163,40 @@ def create_failed_upload_record(
             .insert(upload_data)\
             .execute()
         
-        if data and len(data) > 1 and data[1]:
-            upload_id = data[1][0]['id']
-            logging_start.logger.info(f"Created failed upload record {upload_id}")
-            return upload_id
+        if not data or len(data) <= 1 or not data[1]:
+            logging_start.logger.error("Failed to create upload record")
+            return None
+        
+        upload_id = data[1][0]['id']
+        logging_start.logger.info(f"Created failed upload record {upload_id}")
+        
+        # Now create eeu_data record with file_url and link it via upload_id
+        # Note: company_id is tracked via uploads table, not eeu_data
+        eeu_data = {
+            'file_url': file_url,
+            'file_name': file_name,
+            'upload_id': upload_id,
+            'baseline_design': baseline_design,
+            # Will be updated with energy data when reprocessed
+        }
+        
+        eeu_insert_result, _ = supabase.table('eeu_data')\
+            .insert(eeu_data)\
+            .execute()
+        
+        if eeu_insert_result and len(eeu_insert_result) > 1 and eeu_insert_result[1]:
+            eeu_id = eeu_insert_result[1][0]['id']
+            logging_start.logger.info(f"Created eeu_data record {eeu_id} for failed upload {upload_id}")
+        else:
+            logging_start.logger.warning(f"Failed to create eeu_data record for upload {upload_id}, but upload was created")
+        
+        # Note: Email notification will be sent when the user completes the form in submit_project
+        # This ensures admins are only notified when the user has provided all necessary information
+        
+        return upload_id
             
     except Exception as e:
-        logging_start.logger.error(f"Error creating failed upload record: {e}")
+        logging_start.logger.error(f"Error creating failed upload record: {e}", exc_info=True)
     return None
 
 def update_eeu_record(eeu_id, upload_id):
@@ -779,6 +829,10 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
         item_data.setdefault('design_eeu_id', None)
         item_data.setdefault('energy_code_id', None)
         
+        # Note: file_url is stored in eeu_data for successful uploads
+        # For failed uploads, file_url should be in the uploads table (set by create_failed_upload_record)
+        # Keep file_url/file_name if provided (for failed uploads being resubmitted)
+        
         # Always set company_id (user_id is bigint in uploads table, but we have UUID from auth)
         # The user_id field in uploads references the old users table, so we'll leave it NULL
         # and rely on company_id for filtering
@@ -795,6 +849,7 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
         
         # Check for failed uploads that need admin notification and potentially update
         failed_upload_id = None
+        original_failed_upload_data = None  # Store original data for email notification
         try:
             failed_status_id = get_upload_status_id('failed')
             if failed_status_id:
@@ -819,6 +874,15 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
                 if failed_uploads_data and len(failed_uploads_data) > 1 and failed_uploads_data[1]:
                     failed_upload = failed_uploads_data[1][0]
                     failed_upload_id = failed_upload['id']
+                    
+                    # Store original data before updating (for email notification)
+                    original_failed_upload_data = {
+                        'file_name': failed_upload.get('file_name'),
+                        'processing_error': failed_upload.get('processing_error'),
+                        'baseline_status': failed_upload.get('baseline_status'),
+                        'design_status': failed_upload.get('design_status')
+                    }
+                    logging_start.logger.info(f"Stored original failed upload data for upload {failed_upload_id}: {original_failed_upload_data}")
                     
                     # Update the failed upload record with the new data
                     # Set status to pending since user has now provided project details
@@ -851,7 +915,8 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
                 all_failed_data, _ = all_failed_query.execute()
                 
                 if all_failed_data and len(all_failed_data) > 1:
-                    user_email = get_user_email(user_id)
+                    # Get user email from auth token (more reliable than querying profiles)
+                    user_email = authorized.get('user_email') or get_user_email(user_id)
                     # Get company name
                     company_name = None
                     try:
@@ -901,7 +966,9 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
             else:
                 # For new uploads, set status to pending if no eeu_ids provided (file processing pending)
                 # or completed if eeu_ids are provided (file already processed)
-                if not extract_dict.get('baseline_eeu_id') and not extract_dict.get('design_eeu_id'):
+                has_eeu_ids = extract_dict.get('baseline_eeu_id') or extract_dict.get('design_eeu_id')
+                
+                if not has_eeu_ids:
                     pending_status_id = get_upload_status_id('pending')
                     if pending_status_id:
                         item_data['upload_status_id'] = pending_status_id
@@ -909,6 +976,10 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
                     completed_status_id = get_upload_status_id('completed')
                     if completed_status_id:
                         item_data['upload_status_id'] = completed_status_id
+                
+                # Log if file_url is provided for debugging
+                if item_data.get('file_url'):
+                    logging_start.logger.info(f"Upload includes file_url: {item_data.get('file_url')}")
                 
                 logging_start.logger.info(f"Inserting upload record with data: {item_data}")
                 data, count = supabase.table('uploads')\
@@ -940,6 +1011,86 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
         update_eeu_if_exists('design_eeu_id', extract_dict, upload_id)
         
         logging_start.logger.info(f"Successfully created/updated upload {upload_id} for project {item_data.get('project_id')}")
+        
+        # Send email notification if this was a failed upload that was just completed
+        # Only send if we updated an existing failed upload (failed_upload_id is set)
+        try:
+            logging_start.logger.info(f"Checking if email should be sent for upload {upload_id}")
+            logging_start.logger.info(f"failed_upload_id: {failed_upload_id}, original_failed_upload_data: {original_failed_upload_data is not None}")
+            
+            if failed_upload_id and original_failed_upload_data:
+                logging_start.logger.info(f"Conditions met - this was a failed upload that was updated")
+                
+                # Check if this upload was already notified (shouldn't be, but check to be safe)
+                upload_data, _ = supabase.table('uploads')\
+                    .select('notified_admin')\
+                    .eq('id', upload_id)\
+                    .limit(1)\
+                    .execute()
+                
+                should_send_email = True
+                if upload_data and len(upload_data) > 1 and upload_data[1]:
+                    if upload_data[1][0].get('notified_admin'):
+                        should_send_email = False
+                        logging_start.logger.info(f"Upload {upload_id} already marked as notified, skipping email")
+                
+                logging_start.logger.info(f"should_send_email: {should_send_email}")
+                
+                if should_send_email:
+                    # Get user email from auth token (more reliable than querying profiles)
+                    user_email = authorized.get('user_email') or get_user_email(user_id)
+                    
+                    # Get company name
+                    company_name = None
+                    if company_id:
+                        try:
+                            company_data, _ = supabase.table('companies')\
+                                .select('company_name')\
+                                .eq('id', company_id)\
+                                .limit(1)\
+                                .execute()
+                            if company_data and len(company_data) > 1 and company_data[1]:
+                                company_name = company_data[1][0].get('company_name')
+                        except:
+                            pass
+                    
+                    # Determine baseline_design from original status
+                    baseline_design = None
+                    if original_failed_upload_data.get('baseline_status') == 'failed':
+                        baseline_design = 'baseline'
+                    elif original_failed_upload_data.get('design_status') == 'failed':
+                        baseline_design = 'design'
+                    
+                    # Send email notification with original error message
+                    logging_start.logger.info(f"Preparing to send email notification for failed upload {upload_id}")
+                    logging_start.logger.info(f"Email params: user_email={user_email}, file_name={original_failed_upload_data.get('file_name')}, baseline_design={baseline_design}, company_name={company_name}")
+                    
+                    from email_service import send_failed_upload_notification_to_admin
+                    email_result = send_failed_upload_notification_to_admin(
+                        upload_id,
+                        user_email or 'unknown',
+                        original_failed_upload_data.get('file_name', 'unknown'),
+                        original_failed_upload_data.get('processing_error', 'Unknown error'),
+                        baseline_design,
+                        company_name
+                    )
+                    
+                    logging_start.logger.info(f"Email function returned: {email_result}")
+                    
+                    if email_result:
+                        # Mark as notified
+                        supabase.table('uploads')\
+                            .update({'notified_admin': True})\
+                            .eq('id', upload_id)\
+                            .execute()
+                        logging_start.logger.info(f"Email notification sent successfully for failed upload {upload_id} after form completion")
+                    else:
+                        logging_start.logger.warning(f"Email notification failed for failed upload {upload_id} - not marking as notified")
+            else:
+                logging_start.logger.info(f"Email not sent - conditions not met: failed_upload_id={failed_upload_id}, original_failed_upload_data exists={original_failed_upload_data is not None}")
+        except Exception as e:
+            logging_start.logger.error(f"Error sending email notification for upload {upload_id}: {e}", exc_info=True)
+            # Don't fail the whole operation if email fails
 
         return "success"
 

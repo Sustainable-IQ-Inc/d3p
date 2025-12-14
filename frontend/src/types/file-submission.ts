@@ -11,4 +11,7 @@ export interface SubmitUploadProps {
     design_eeu_id?: number | null;
     year: number;
     reporting_year: number;
-    use_type_subtype_id?: number | null;  }
+    use_type_subtype_id?: number | null;
+    file_url?: string;
+    file_name?: string;
+  }
