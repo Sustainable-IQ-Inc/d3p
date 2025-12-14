@@ -687,7 +687,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                               <b>Baseline File</b>
 
                               {values.records[index].baseline_file_data && 
-                               values.records[index].baseline_file_data.id ? (
+                               values.records[index].baseline_file_data?.id ? (
                                 <ProjectCard
                                   total_energy={
                                     values.records[index]?.baseline_file_data
