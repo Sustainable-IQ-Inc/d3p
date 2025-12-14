@@ -289,7 +289,6 @@ The deployment workflow uses environment-specific secrets to support separate st
   - **Important**: Encode the file before adding to GitHub: `base64 -w 0 signing-key.json`
 - `SENDGRID_API_KEY`: Your SendGrid API key for sending emails
 - `SENDGRID_FROM_EMAIL`: The email address to send emails from (must be verified in SendGrid)
-- `TEST_EMAIL`: Email address for testing email functionality
 - `ADMIN_EMAILS`: Comma-separated list of admin email addresses for notifications
 
 #### Staging Environment Secrets:

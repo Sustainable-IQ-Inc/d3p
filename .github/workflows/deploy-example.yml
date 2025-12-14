@@ -45,5 +45,4 @@ jobs:
       # Email Configuration (common across environments)
       SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
       SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
-      TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
       ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
