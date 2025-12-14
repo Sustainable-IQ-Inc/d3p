@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 
 // material-ui
-import { Grid, Box, Chip, Button } from "@mui/material";
+import { Grid, Box, Chip } from "@mui/material";
 import { Link } from "@mui/material";
 
 // project import
