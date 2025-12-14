@@ -92,3 +92,7 @@ jobs:
       SUPABASE_DB_PASSWORD: ${{ github.ref_name == 'main' && secrets.PROD_SUPABASE_DB_PASSWORD || secrets.STAGING_SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_ID: ${{ github.ref_name == 'main' && secrets.PROD_SUPABASE_PROJECT_ID || secrets.STAGING_SUPABASE_PROJECT_ID }}
       GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      # Email Configuration (common across environments)
+      SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+      SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
+      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}

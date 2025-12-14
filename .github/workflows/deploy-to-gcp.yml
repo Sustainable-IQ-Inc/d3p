@@ -58,8 +58,6 @@ on:
         required: false
       SENDGRID_FROM_EMAIL:
         required: false
-      TEST_EMAIL:
-        required: false
       ADMIN_EMAILS:
         required: false
 
@@ -277,17 +275,34 @@ jobs:
           fi
           
           # Email Configuration (common secrets, no environment prefix)
-          if [ -n "${{ secrets.SENDGRID_API_KEY }}" ]; then
-            create_or_update_secret "SENDGRID_API_KEY" "${{ secrets.SENDGRID_API_KEY }}"
+          # Debug: Check if secrets are being passed (without revealing values)
+          echo "🔍 Checking email secrets..."
+          SENDGRID_API_KEY_VALUE="${{ secrets.SENDGRID_API_KEY }}"
+          SENDGRID_FROM_EMAIL_VALUE="${{ secrets.SENDGRID_FROM_EMAIL }}"
+          ADMIN_EMAILS_VALUE="${{ secrets.ADMIN_EMAILS }}"
+          
+          if [ -n "$SENDGRID_API_KEY_VALUE" ]; then
+            echo "✓ SENDGRID_API_KEY is set (length: ${#SENDGRID_API_KEY_VALUE})"
+            create_or_update_secret "SENDGRID_API_KEY" "$SENDGRID_API_KEY_VALUE"
+            echo "✓ SENDGRID_API_KEY secret created/updated in GCP"
+          else
+            echo "⚠ SENDGRID_API_KEY not provided in GitHub secrets - skipping"
           fi
-          if [ -n "${{ secrets.SENDGRID_FROM_EMAIL }}" ]; then
-            create_or_update_secret "SENDGRID_FROM_EMAIL" "${{ secrets.SENDGRID_FROM_EMAIL }}"
+          
+          if [ -n "$SENDGRID_FROM_EMAIL_VALUE" ]; then
+            echo "✓ SENDGRID_FROM_EMAIL is set (value: $SENDGRID_FROM_EMAIL_VALUE)"
+            create_or_update_secret "SENDGRID_FROM_EMAIL" "$SENDGRID_FROM_EMAIL_VALUE"
+            echo "✓ SENDGRID_FROM_EMAIL secret created/updated in GCP"
+          else
+            echo "⚠ SENDGRID_FROM_EMAIL not provided in GitHub secrets - skipping"
           fi
-          if [ -n "${{ secrets.TEST_EMAIL }}" ]; then
-            create_or_update_secret "TEST_EMAIL" "${{ secrets.TEST_EMAIL }}"
-          fi
-          if [ -n "${{ secrets.ADMIN_EMAILS }}" ]; then
-            create_or_update_secret "ADMIN_EMAILS" "${{ secrets.ADMIN_EMAILS }}"
+          
+          if [ -n "$ADMIN_EMAILS_VALUE" ]; then
+            echo "✓ ADMIN_EMAILS is set (length: ${#ADMIN_EMAILS_VALUE})"
+            create_or_update_secret "ADMIN_EMAILS" "$ADMIN_EMAILS_VALUE"
+            echo "✓ ADMIN_EMAILS secret created/updated in GCP"
+          else
+            echo "⚠ ADMIN_EMAILS not provided in GitHub secrets - skipping"
           fi
 
       - name: Configure Docker
@@ -324,8 +339,35 @@ jobs:
           docker build -t "$IMAGE_NAME" .
           docker push $IMAGE_NAME
           
-          SECRET_REFS="SUPABASE_URL=${ENVIRONMENT^^}_SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE=${ENVIRONMENT^^}_SUPABASE_SERVICE_ROLE:latest,ENCRYPTION_KEY=${ENVIRONMENT^^}_ENCRYPTION_KEY:latest,ENCRYPTION_SALT=${ENVIRONMENT^^}_ENCRYPTION_SALT:latest,REDIRECT_URL=${ENVIRONMENT^^}_REDIRECT_URL:latest,ALLOWED_ORIGINS=${ENVIRONMENT^^}_ALLOWED_ORIGINS:latest,DDX_API_BASE_URL=${ENVIRONMENT^^}_DDX_API_BASE_URL:latest,BUCKET_NAME=${ENVIRONMENT^^}_BUCKET_NAME:latest,SIGNING_SA_CREDENTIALS_BASE64=SIGNING_SA_CREDENTIALS:latest,SENDGRID_API_KEY=SENDGRID_API_KEY:latest,SENDGRID_FROM_EMAIL=SENDGRID_FROM_EMAIL:latest,TEST_EMAIL=TEST_EMAIL:latest,ADMIN_EMAILS=ADMIN_EMAILS:latest"
+          # Build SECRET_REFS conditionally - only include secrets that exist
+          SECRET_REFS="SUPABASE_URL=${ENVIRONMENT^^}_SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE=${ENVIRONMENT^^}_SUPABASE_SERVICE_ROLE:latest,ENCRYPTION_KEY=${ENVIRONMENT^^}_ENCRYPTION_KEY:latest,ENCRYPTION_SALT=${ENVIRONMENT^^}_ENCRYPTION_SALT:latest,REDIRECT_URL=${ENVIRONMENT^^}_REDIRECT_URL:latest,ALLOWED_ORIGINS=${ENVIRONMENT^^}_ALLOWED_ORIGINS:latest,BUCKET_NAME=${ENVIRONMENT^^}_BUCKET_NAME:latest,SIGNING_SA_CREDENTIALS_BASE64=SIGNING_SA_CREDENTIALS:latest"
           
+          # Add optional DDX_API_BASE_URL if it exists
+          if gcloud secrets describe "${ENVIRONMENT^^}_DDX_API_BASE_URL" --project=$PROJECT_ID &>/dev/null; then
+            SECRET_REFS="$SECRET_REFS,DDX_API_BASE_URL=${ENVIRONMENT^^}_DDX_API_BASE_URL:latest"
+          fi
+          
+          # Add email secrets if they exist
+          if gcloud secrets describe "SENDGRID_API_KEY" --project=$PROJECT_ID &>/dev/null; then
+            SECRET_REFS="$SECRET_REFS,SENDGRID_API_KEY=SENDGRID_API_KEY:latest"
+          else
+            echo "⚠ Warning: SENDGRID_API_KEY secret not found in Secret Manager - will not be included in deployment"
+          fi
+          if gcloud secrets describe "SENDGRID_FROM_EMAIL" --project=$PROJECT_ID &>/dev/null; then
+            SECRET_REFS="$SECRET_REFS,SENDGRID_FROM_EMAIL=SENDGRID_FROM_EMAIL:latest"
+          else
+            echo "⚠ Warning: SENDGRID_FROM_EMAIL secret not found in Secret Manager - will not be included in deployment"
+          fi
+          if gcloud secrets describe "ADMIN_EMAILS" --project=$PROJECT_ID &>/dev/null; then
+            SECRET_REFS="$SECRET_REFS,ADMIN_EMAILS=ADMIN_EMAILS:latest"
+          else
+            echo "⚠ Warning: ADMIN_EMAILS secret not found in Secret Manager - will not be included in deployment"
+          fi
+          
+          echo "📋 Deploying service with secrets: $SECRET_REFS"
+          
+          # Deploy - --update-secrets will replace all secret references, removing any not in the list
+          # This will automatically remove old references like TEST_EMAIL that are no longer in SECRET_REFS
           gcloud run deploy "$SERVICE_NAME" \
             --image="$IMAGE_NAME" \
             --region=us-central1 \

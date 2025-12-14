@@ -156,9 +156,6 @@ case $choice in
         sendgrid_from_email=$(prompt_for_value "SendGrid From Email")
         set_secret "SENDGRID_FROM_EMAIL" "$sendgrid_from_email"
         
-        test_email=$(prompt_for_value "Test Email")
-        set_secret "TEST_EMAIL" "$test_email"
-        
         admin_emails=$(prompt_for_value "Admin Emails (comma-separated)")
         set_secret "ADMIN_EMAILS" "$admin_emails"
         
@@ -274,9 +271,6 @@ case $choice in
         sendgrid_from_email=$(prompt_for_value "SendGrid From Email")
         set_secret "SENDGRID_FROM_EMAIL" "$sendgrid_from_email"
         
-        test_email=$(prompt_for_value "Test Email")
-        set_secret "TEST_EMAIL" "$test_email"
-        
         admin_emails=$(prompt_for_value "Admin Emails (comma-separated)")
         set_secret "ADMIN_EMAILS" "$admin_emails"
         
@@ -371,7 +365,6 @@ case $choice in
         # Email Configuration (common across environments)
         [ -n "$SENDGRID_API_KEY" ] && set_secret "SENDGRID_API_KEY" "$SENDGRID_API_KEY"
         [ -n "$SENDGRID_FROM_EMAIL" ] && set_secret "SENDGRID_FROM_EMAIL" "$SENDGRID_FROM_EMAIL"
-        [ -n "$TEST_EMAIL" ] && set_secret "TEST_EMAIL" "$TEST_EMAIL"
         [ -n "$ADMIN_EMAILS" ] && set_secret "ADMIN_EMAILS" "$ADMIN_EMAILS"
         
         # Staging secrets
