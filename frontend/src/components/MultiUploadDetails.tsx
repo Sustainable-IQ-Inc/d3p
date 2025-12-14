@@ -619,18 +619,22 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                       status,
                                       response
                                     ) => {
+                                      if (selectedRecordIndex === null) {
+                                        return;
+                                      }
+                                      
                                       if (status === "done" || status === "warning") {
                                         // Check if this is a failed upload that allows form completion
                                         if (status === "warning" && response && response.status === 'error' && response.allow_form_completion) {
                                           // Failed upload - mark baseline as attempted but don't set id
-                                          const currentBaseline = values.records[selectedRecordIndex].baseline_file_data || {};
+                                          const currentBaseline = values.records[selectedRecordIndex].baseline_file_data;
                                           setFieldValue(
                                             `records.${selectedRecordIndex}.baseline_file_data`,
                                             {
-                                              ...currentBaseline,
+                                              ...(currentBaseline || {}),
                                               upload_attempted: true,
-                                              file_name: response.file_name || currentBaseline.file_name,
-                                              file_url: response.url || currentBaseline.file_url  // Capture URL
+                                              file_name: response.file_name || currentBaseline?.file_name,
+                                              file_url: response.url || currentBaseline?.file_url  // Capture URL
                                             }
                                           );
                                           handleClose();
