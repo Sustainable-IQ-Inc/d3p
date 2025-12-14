@@ -94,29 +94,40 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
       if (status === "done") {
         // Check if the response contains an error status
         if (response && typeof response === 'object' && response.status === 'error') {
-          // Extract error message from response
-          let errorMessage = 'Upload failed';
-          if (response.message) {
-            try {
-              // Try to parse the message if it's JSON
-              const parsedMessage = JSON.parse(response.message);
-              if (parsedMessage.error && typeof parsedMessage.error === 'object') {
-                errorMessage = Object.entries(parsedMessage.error)
-                  .map(([field, msg]) => `${field}: ${msg}`)
-                  .join(', ');
-              } else {
+          // Check if form completion is allowed (failed upload that can still be processed)
+          if (response.allow_form_completion) {
+            // Show warning but allow form completion
+            const errorMessage = response.message || 'File could not be processed automatically. You can still complete the form below. We\'ll notify you when processing is complete.';
+            message.warning(errorMessage);
+            setIsUploading(false);
+            // Treat as partial success - allow form to be filled
+            setUploadStatus("warning");
+            onUploadStatusChange("warning", response, isUploading);
+          } else {
+            // Extract error message from response
+            let errorMessage = 'Upload failed';
+            if (response.message) {
+              try {
+                // Try to parse the message if it's JSON
+                const parsedMessage = JSON.parse(response.message);
+                if (parsedMessage.error && typeof parsedMessage.error === 'object') {
+                  errorMessage = Object.entries(parsedMessage.error)
+                    .map(([field, msg]) => `${field}: ${msg}`)
+                    .join(', ');
+                } else {
+                  errorMessage = response.message;
+                }
+              } catch (e) {
+                // If parsing fails, use the raw message
                 errorMessage = response.message;
               }
-            } catch (e) {
-              // If parsing fails, use the raw message
-              errorMessage = response.message;
             }
+            message.error(`${info.file.name} upload failed: ${errorMessage}`);
+            setIsUploading(false);
+            // Treat this as an error for status purposes
+            setUploadStatus("error");
+            onUploadStatusChange("error", response, isUploading);
           }
-          message.error(`${info.file.name} upload failed: ${errorMessage}`);
-          setIsUploading(false);
-          // Treat this as an error for status purposes
-          setUploadStatus("error");
-          onUploadStatusChange("error", response, isUploading);
         } else {
           // Actual success
           message.success(`${info.file.name} file uploaded successfully.`);

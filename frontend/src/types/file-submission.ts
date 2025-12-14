@@ -8,7 +8,10 @@ export interface SubmitUploadProps {
     energy_code_id: number;
     report_type_id?: number;
     baseline_eeu_id?: number| null;
-    design_eeu_id: number;
+    design_eeu_id?: number | null;
     year: number;
     reporting_year: number;
-    use_type_subtype_id?: number | null;  }
+    use_type_subtype_id?: number | null;
+    file_url?: string;
+    file_name?: string;
+  }

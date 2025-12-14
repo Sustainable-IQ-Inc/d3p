@@ -17,6 +17,7 @@ from conversions import convert_units_in_table
 import models
 from update_routes import router as update_router
 from upload_routes import router as upload_router
+from failed_uploads_routes import router as failed_uploads_router
 from project_details import return_project_details, get_signed_url_from_project_id, get_energy_end_uses_chart_data, combine_end_uses_data, get_change_history
 from operational_data import operational_carbon_data, operational_energy_data
 from weather_location import get_climate_zone_by_zip
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 app = create_app()
 app.include_router(update_router)
 app.include_router(upload_router)
+app.include_router(failed_uploads_router)
 
 security = HTTPBearer()
 
