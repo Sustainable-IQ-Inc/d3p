@@ -58,17 +58,6 @@ const PendingUploadsPage = () => {
     return <Chip label="Pending" color="warning" size="small" />;
   };
 
-  const getStatusText = (upload: PendingUploadProps) => {
-    if (upload.baseline_status === "failed" && upload.design_status === "failed") {
-      return "Both Baseline & Design Failed";
-    } else if (upload.baseline_status === "failed") {
-      return "Baseline Failed";
-    } else if (upload.design_status === "failed") {
-      return "Design Failed";
-    }
-    return "Pending Processing";
-  };
-
   const columns: ColumnDef<PendingUploadProps>[] = [
     {
       header: "File Name",
