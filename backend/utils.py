@@ -174,11 +174,42 @@ def add_event_history(table_name,field_name,ref_id,new_value,user_id,previous_va
         return "error"
     
 def sanitize_filename(filename):
-    # Remove invalid characters
-    filename = re.sub(r'[\\/*?:"<>|]', "", filename)
-    # Replace spaces with underscores
-    filename = filename.replace(" ", "_")
-    return filename
+    """
+    Sanitize filename to be safe for GCS blob names and URLs.
+    Removes or replaces characters that can cause issues with file storage and URL generation.
+    """
+    import urllib.parse
+    
+    # First, get just the base name and extension
+    name_parts = filename.rsplit('.', 1)
+    base_name = name_parts[0] if len(name_parts) > 0 else filename
+    extension = '.' + name_parts[1] if len(name_parts) > 1 else ''
+    
+    # Remove or replace problematic characters from the base name
+    # Remove: \/*?:"<>|
+    base_name = re.sub(r'[\\/*?:"<>|]', "", base_name)
+    
+    # Replace spaces, parentheses, and brackets with underscores
+    base_name = re.sub(r'[\s()\[\]{}]', "_", base_name)
+    
+    # Replace multiple consecutive underscores/dashes with a single one
+    base_name = re.sub(r'[_-]{2,}', "_", base_name)
+    
+    # Remove leading/trailing underscores and dashes
+    base_name = base_name.strip('_-')
+    
+    # If base_name is empty after sanitization, use a default
+    if not base_name:
+        base_name = "file"
+    
+    # Reconstruct filename
+    sanitized = base_name + extension
+    
+    # URL encode any remaining special characters to be extra safe
+    # This handles characters like #, %, etc.
+    sanitized = urllib.parse.quote(sanitized, safe='.-_')
+    
+    return sanitized
 
 def get_field_name_from_use_type(use_type, fuel_category):
     query = supabase.table('eeu_fields')\

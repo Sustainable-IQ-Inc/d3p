@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 import models
-from utils import verify_token, add_event_history, supabase
+from utils import verify_token, add_event_history, supabase, sanitize_filename
 from typing import Optional, Dict, Union
 from uuid import uuid4
 from gcs_upload import upload_blob, get_signed_url_from_url
@@ -427,12 +427,19 @@ async def create_upload_file(item: models.ReportUpload = Depends(), authorized: 
         if BUCKET_NAME is None:
             print("ERROR: BUCKET_NAME environment variable is not set")
             raise ValueError("BUCKET_NAME environment variable is not set")
+        
+        # Store original filename for display purposes
+        original_file_name = item.file.filename
+        
+        # Sanitize the filename to avoid issues with special characters in GCS blob names and URLs
+        sanitized_filename = sanitize_filename(item.file.filename)
+        
         #create a unique uuid for the filename
         uuid = uuid4()
-        filename_new = 'report_uploads/' + str(uuid) + item.file.filename
-        file_name = item.file.filename
+        filename_new = 'report_uploads/' + str(uuid) + sanitized_filename
+        file_name = original_file_name  # Keep original for display/logging
         file_extension = os.path.splitext(filename_new)[1]
-        print(f"DEBUG: Uploading file to GCS - filename: {filename_new}, extension: {file_extension}")
+        print(f"DEBUG: Uploading file to GCS - original: {original_file_name}, sanitized: {sanitized_filename}, full path: {filename_new}, extension: {file_extension}")
         url = upload_blob(BUCKET_NAME, filename_new, file_obj = item.file.file,)
         print(f"DEBUG: File uploaded to GCS, URL: {url}")
 
