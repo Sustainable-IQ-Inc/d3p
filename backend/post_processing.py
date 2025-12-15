@@ -44,6 +44,17 @@ def post_process(df_output):
 
   df_2_full=pd.DataFrame()
   df_output = df_output.reset_index(drop=True)
+  
+  # Validate dataframe is not empty
+  if df_output.empty or len(df_output) == 0:
+    raise ValueError("Input dataframe is empty - no data to process")
+  
+  # Validate required columns exist
+  required_cols = ['report', 'conditioned_area_sf', 'energy_units', 'energy_value']
+  missing_cols = [col for col in required_cols if col not in df_output.columns]
+  if missing_cols:
+    raise ValueError(f"Missing required columns in dataframe: {missing_cols}. Available columns: {list(df_output.columns)}")
+  
   report_type = df_output.loc[0]['report']
 
   conditioned_sf = df_output.loc[0]['conditioned_area_sf'].astype('float')
@@ -107,7 +118,16 @@ def post_process(df_output):
     }
 
   df_cm = df_cm[df_cm['report'] == report_type] 
+  
+  # Validate report_field column exists before merge
+  if 'report_field' not in df_output.columns:
+    raise ValueError(f"Missing 'report_field' column in dataframe. Available columns: {list(df_output.columns)}")
+  
   df_cm_output = pd.merge(df_output,df_cm,on="report_field",how='outer')
+  
+  # Validate merge produced results
+  if df_cm_output.empty or len(df_cm_output) == 0:
+    raise ValueError(f"Merge with column mapping failed - no matching report_field values found. Report type: {report_type}")
 
   ##figure out number of rows per output per report
   if(uncommon_units==True):
@@ -119,6 +139,11 @@ def post_process(df_output):
   output_records=[]
   for k in range(len(report_rows)):
     if(report_rows[k]=='report_values'):
+      # Validate energy_units_report column exists
+      if 'energy_units_report' not in df_cm_output.columns:
+        raise ValueError(f"Missing 'energy_units_report' column after merge. Available columns: {list(df_cm_output.columns)}")
+      if len(df_cm_output) == 0:
+        raise ValueError("Dataframe is empty - cannot access energy_units_report")
       energy_units = df_cm_output.loc[0]['energy_units_report']
       energy_value_to_use='energy_value_report'
       energy_multiplier=1
@@ -190,9 +215,22 @@ def post_process(df_output):
     df_fields_list = pd.concat([df_fields_list,pd.DataFrame([df_row_project_name])])
 
     df_new = df_fields_list.T
+    
+    # Validate dataframe has enough rows before accessing indices
+    if len(df_new) < 4:
+      raise ValueError(f"Transformed dataframe has insufficient rows ({len(df_new)}), expected at least 4")
+    
+    if df_new.shape[1] == 0:
+      raise ValueError("Transformed dataframe has no columns")
+    
     df_new['energy_units']=df_new.iloc[3,0]
     df_new.drop(labels=['fuel_source','units'],axis=0,inplace=True)
     df_new.reset_index(inplace=True,drop=True)
+    
+    # Validate we still have data after dropping rows
+    if len(df_new) == 0:
+      raise ValueError("Dataframe is empty after dropping fuel_source and units rows")
+    
     new_header = df_new.iloc[0] #grab the first row for the header
     df_new = df_new[1:] #take the data less the header row
     df_new.columns = new_header #set the header row as the df header
@@ -281,10 +319,10 @@ def run_script_master(url, **kwargs):
 
   try:
     post_process_result = post_process(df_output)
-  except ValueError as err:
+  except Exception as err:
     post_process_error = "error attachment url:"+url+"error text:"+str(err)
     printer(post_process_error)
-    errors.append("There was an error processing your file.")
+    errors.append(f"There was an error processing your file: {str(err)}")
     traceback.print_exc()
     return ["ERROR",errors,warnings]
   

@@ -23,6 +23,11 @@ def printer(str):
 def process_prm_table(df,prm_baseline_design):
 
     df = df.loc[df['check_row_type']=="Energy use kBtu"]
+    
+    # Validate that we have data after filtering
+    if df.empty or len(df) == 0:
+        printer("Error: No rows found with 'Energy use kBtu' in check_row_type column")
+        raise ValueError("No energy use data found in PRM table")
 
     for i in range(len(df)):
         if(df.iloc[i,df.columns.get_loc('energy_type')].find("Gas")!=-1):
@@ -50,11 +55,32 @@ def process_prm_table(df,prm_baseline_design):
     bl_cols=std_cols+bl_col
 
     all_cols=std_cols+bl_col+des_col
+    
+    # Validate all required columns exist
+    missing_cols = [col for col in all_cols if col not in df.columns]
+    if missing_cols:
+        printer(f"Error: Missing required columns in PRM table: {missing_cols}")
+        raise ValueError(f"Missing required columns: {missing_cols}")
+    
     df=df[all_cols]
-    print(df)
     for i in range(len(df)):
-        df.iloc[i,df.columns.get_loc('design_value')]=float(df.iloc[i,df.columns.get_loc('design_value')].replace(',',''))/1000
-        df.iloc[i,df.columns.get_loc('baseline_value')]=float(df.iloc[i,df.columns.get_loc('baseline_value')].replace(',',''))/1000
+        try:
+            design_val = str(df.iloc[i,df.columns.get_loc('design_value')])
+            baseline_val = str(df.iloc[i,df.columns.get_loc('baseline_value')])
+            
+            # Handle NaN or empty values
+            if pd.isna(design_val) or design_val == 'nan' or design_val.strip() == '':
+                printer(f"Warning: Empty design_value at row {i}, setting to 0")
+                design_val = '0'
+            if pd.isna(baseline_val) or baseline_val == 'nan' or baseline_val.strip() == '':
+                printer(f"Warning: Empty baseline_value at row {i}, setting to 0")
+                baseline_val = '0'
+            
+            df.iloc[i,df.columns.get_loc('design_value')]=float(design_val.replace(',',''))/1000
+            df.iloc[i,df.columns.get_loc('baseline_value')]=float(baseline_val.replace(',',''))/1000
+        except (ValueError, IndexError) as e:
+            printer(f"Error processing row {i}: {e}")
+            raise ValueError(f"Error processing energy values at row {i}: {str(e)}")
 
     df_des=df[des_cols]
     output_filenames=[]
@@ -103,6 +129,7 @@ def parse_report_iesve_prm(url,baseline_design):
         page_no_to_use_sf=-999
         page_no_to_use_main_table=-999
         page_no_to_use_weather=-999
+        double_page_table=False  # Initialize to False
 
 
 
@@ -113,30 +140,29 @@ def parse_report_iesve_prm(url,baseline_design):
             found_text_1= txt.find("Space Summary")
             found_text_2= txt.find("Building Use")
             if(page_no_to_use_sf==-999 and found_text_1!=-1 and found_text_2!=-1):
-            
                 page_no_to_use_sf=i
 
             ##Find page with the table that contains the Design and Baseline values
             found_text_3 = txt.find("Performance Rating Table - PRM Compliance")
             #found_text_4 = txt.find("Total Annual Energy Use")
 
-
-
-
-
             if(found_text_3!=-1):
-            
                 page_no_to_use_main_table=i
                 ##  look in the page after the main table for the next section header, if it's not there, then it's a two page table
                 
-                txt_next_page = pages[i+1].extract_text()
-                found_text_6 = txt_next_page.find("Energy Cost & Consumption by energy Type")
-                if(found_text_6!=-1):
-                    double_page_table=False
+                # Check if there's a next page before accessing it
+                if i+1 < len(pages):
+                    txt_next_page = pages[i+1].extract_text()
+                    found_text_6 = txt_next_page.find("Energy Cost & Consumption by energy Type")
+                    if(found_text_6!=-1):
+                        double_page_table=False
+                    else:
+                        page_no_to_use_main_table_2=i+1
+                        double_page_table=True
+                        page_to_use_main_table_2=pdf.pages[page_no_to_use_main_table_2]
                 else:
-                    page_no_to_use_main_table_2=i+1
-                    double_page_table=True
-                    page_to_use_main_table_2=pdf.pages[page_no_to_use_main_table_2] 
+                    # Last page, so it's not a double page table
+                    double_page_table=False 
 
 
             ##Find page with the table that contains the weather locaiton data
@@ -158,6 +184,22 @@ def parse_report_iesve_prm(url,baseline_design):
 
             
 
+
+        # Validate that all required pages were found
+        if page_no_to_use_sf == -999:
+            error_msg = "Could not find 'Space Summary' page in PDF"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg)
+        
+        if page_no_to_use_main_table == -999:
+            error_msg = "Could not find 'Performance Rating Table - PRM Compliance' page in PDF"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg)
+        
+        if page_no_to_use_weather == -999:
+            error_msg = "Could not find 'Weather file' page in PDF"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg)
 
         #im=first_page.to_image()
         #im.reset().debug_tablefinder()
@@ -189,12 +231,18 @@ def parse_report_iesve_prm(url,baseline_design):
         page_to_use_sf = pdf.pages[page_no_to_use_sf] 
         try:
             totals_text= page_to_use_sf.search('Totals')
+            if not totals_text or len(totals_text) == 0:
+                error_msg = "Could not locate square footage table - missing 'Totals' marker"
+                printer(f"Error: {error_msg}")
+                raise ValueError(error_msg)
             left_sf=totals_text[0].get('x0')-5
             left_sf=0
             top_sf=totals_text[0].get('top')
             bottom_sf=totals_text[0].get('bottom')
-        except:
-            print("could not find that text")
+        except Exception as e:
+            error_msg = f"Could not locate square footage table: {str(e)}"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg) from e
     
         page_width_sf=page_to_use_sf.width
         right_sf=page_width_sf 
@@ -202,10 +250,26 @@ def parse_report_iesve_prm(url,baseline_design):
         sf_table = page_to_use_sf.crop((left_sf,top_sf,right_sf,bottom_sf),relative=True)
         data_sf=sf_table.extract_table(table_settings_sf)
 
+        # Validate that we extracted table data
+        if not data_sf or len(data_sf) == 0:
+            error_msg = "Could not extract square footage table from PDF"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg)
+        
         #remove any columns from data_sf that are empty
         data_sf = [x.strip() for x in data_sf[0] if x.strip()]
 
+        # Validate that we have data after cleaning
+        if not data_sf or len(data_sf) == 0:
+            error_msg = "Square footage table is empty after cleaning"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg)
+
         if(data_sf[0]=="Totals"):
+            if len(data_sf) < 2:
+                error_msg = "Square footage table format is incorrect - missing value after 'Totals'"
+                printer(f"Error: {error_msg}")
+                raise ValueError(error_msg)
             conditioned_space = data_sf[1]
         else:
             conditioned_space = data_sf[0]
@@ -218,24 +282,65 @@ def parse_report_iesve_prm(url,baseline_design):
         try:
             weather_loc_text="Weather file"
             weather_loc= page_to_use_weather.search(weather_loc_text)
+            if not weather_loc or len(weather_loc) == 0:
+                error_msg = "Could not locate weather data - missing 'Weather file' marker"
+                printer(f"Error: {error_msg}")
+                raise ValueError(error_msg)
+            
             all_weather_text=page_to_use_weather.extract_text()
-            weather_bottom_text="zone:"
-            weather_bottom_loc= page_to_use_weather.search(weather_bottom_text,x_tolerance=3, y_tolerance=3,case=False)
+            # Try multiple variations of the bottom marker
+            weather_bottom_loc = None
+            weather_bottom_text = None
+            for bottom_text in ["zone:", "Climate zone:"]:
+                weather_bottom_loc = page_to_use_weather.search(bottom_text, x_tolerance=3, y_tolerance=3, case=False)
+                if weather_bottom_loc and len(weather_bottom_loc) > 0:
+                    weather_bottom_text = bottom_text
+                    break
+            
+            if not weather_bottom_loc or len(weather_bottom_loc) == 0:
+                error_msg = "Could not locate weather data - missing 'zone:' or 'Climate zone:' marker"
+                printer(f"Error: {error_msg}")
+                raise ValueError(error_msg)
 
             left_weather=weather_loc[0].get('x0')
             top_weather=weather_loc[0].get('top')
             bottom_weather=weather_bottom_loc[0].get('top')
-        except:
-            print("could not find that text")
+        except Exception as e:
+            error_msg = f"Could not locate weather data: {str(e)}"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg) from e
         page_width_weather=page_to_use_weather.width
         page_height_weather=page_to_use_weather.height
         right_weather=page_width_weather 
         weather_table = page_to_use_weather.crop((left_weather,top_weather,right_weather,bottom_weather),relative=True)
         data_weather=weather_table.extract_table(table_settings_weather)
-        data_weather=data_weather[0][0]
         
-
-        weather_string = data_weather[len(weather_loc_text):]
+        # If table extraction fails, try extracting text directly
+        weather_string = None
+        if not data_weather or len(data_weather) == 0 or (len(data_weather) > 0 and len(data_weather[0]) == 0):
+            # Fall back to text extraction
+            weather_text = weather_table.extract_text()
+            if weather_text:
+                # Remove the "Weather file" prefix and any trailing "Climate zone:" text
+                weather_text_clean = weather_text.replace(weather_loc_text, "").strip()
+                # Remove any trailing "Climate zone:" or "zone:" text
+                for suffix in ["Climate zone:", "zone:"]:
+                    if weather_text_clean.endswith(suffix):
+                        weather_text_clean = weather_text_clean[:-len(suffix)].strip()
+                weather_string = weather_text_clean
+        else:
+            # Use table extraction method (original behavior)
+            data_weather=data_weather[0][0]
+            weather_string = data_weather[len(weather_loc_text):]
+        
+        # Validate that we extracted weather string
+        if not weather_string or weather_string.strip() == "":
+            error_msg = "Could not extract weather string from PDF"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg)
+        
+        # Clean up the weather string (remove extra whitespace, newlines, etc.)
+        weather_string = ' '.join(weather_string.split())
 
 
 
@@ -250,12 +355,23 @@ def parse_report_iesve_prm(url,baseline_design):
             offset=0
         try:
             set_left= page_to_use_main_table.search('Combined Heat and Power')
+            if not set_left or len(set_left) == 0:
+                error_msg = "Could not locate main energy table - missing 'Combined Heat and Power' marker"
+                printer(f"Error: {error_msg}")
+                raise ValueError(error_msg)
             left=set_left[0].get('x0')+offset
+            
             set_top= page_to_use_main_table.search('%')
+            if not set_top or len(set_top) == 0:
+                error_msg = "Could not locate main energy table - missing '%' marker"
+                printer(f"Error: {error_msg}")
+                raise ValueError(error_msg)
 
             top=set_top[0].get('bottom')
-        except:
-            print("could not find that text")
+        except Exception as e:
+            error_msg = f"Could not locate main energy table: {str(e)}"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg) from e
     
         page_width=page_to_use_main_table.width
         page_height=page_to_use_main_table.height
@@ -266,18 +382,39 @@ def parse_report_iesve_prm(url,baseline_design):
         main_table = page_to_use_main_table.crop((left,top,right,page_height),relative=True)
         eeu_table=main_table.extract_table(table_settings_main_table)
         
+        # Validate that we extracted the main energy table
+        if not eeu_table or len(eeu_table) == 0:
+            error_msg = "Could not extract main energy table from PDF"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg)
+        
         ##if it's a double page report, extract second page and add it to same dataframe
         df=pd.DataFrame(eeu_table)
         if(double_page_table):
             set_top= page_to_use_main_table_2.search('%')
+            if not set_top or len(set_top) == 0:
+                error_msg = "Could not extract second page of energy table - missing '%' marker"
+                printer(f"Error: {error_msg}")
+                raise ValueError(error_msg)
             top=set_top[0].get('bottom')
             
             main_table2=page_to_use_main_table_2.crop((left,top,right,page_height),relative=True)
             eeu_table2=main_table2.extract_table(table_settings_main_table)
+            
+            if not eeu_table2 or len(eeu_table2) == 0:
+                error_msg = "Could not extract second page of main energy table from PDF"
+                printer(f"Error: {error_msg}")
+                raise ValueError(error_msg)
         
             df_2=pd.DataFrame(eeu_table2)
 
             df=pd.concat([df,df_2])
+        
+        # Validate dataframe has required columns
+        if df.shape[1] < 7:
+            error_msg = f"Energy table format is incorrect - has only {df.shape[1]} columns, expected at least 7"
+            printer(f"Error: {error_msg}")
+            raise ValueError(error_msg)
         
         df=df[[0,2,3,4,6,]]
 

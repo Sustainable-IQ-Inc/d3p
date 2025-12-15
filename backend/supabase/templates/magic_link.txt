@@ -1,0 +1,31 @@
+VERIFICATION CODE
+================
+
+Hello!
+
+You requested to sign in to your account. Use the verification code below to complete your login.
+
+YOUR VERIFICATION CODE
+----------------------
+{{ .Token }}
+----------------------
+
+Enter this code on the login page.
+
+⏰ TIME SENSITIVE: This code will expire in 60 minutes. If you don't use it in time, you'll need to request a new one.
+
+If you didn't request this code, you can safely ignore this email. Your account remains secure.
+
+SECURITY TIPS
+-------------
+• Never share this code with anyone, including our support team
+• We will never ask you for this code via phone or email
+• Always verify you're on the official login page before entering the code
+
+---
+This email was sent to {{ .Email }}
+
+If you have any questions or concerns, please contact our support team.
+
+This is an automated message, please do not reply to this email.
+

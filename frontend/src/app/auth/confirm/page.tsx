@@ -8,8 +8,7 @@ import useSupabase from 'hooks/useSupabase';
 export default function ConfirmPage() {
   const router = useRouter();
   const supabase = useSupabase();
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const [errorMessage, setErrorMessage] = useState('');
+  const [status, setStatus] = useState<'loading' | 'success'>('loading');
   const [hasRun, setHasRun] = useState(false);
 
   useEffect(() => {
@@ -34,27 +33,60 @@ export default function ConfirmPage() {
         console.log('Cookies:', document.cookie);
         console.log('LocalStorage keys:', Object.keys(localStorage));
         
-        // Extract tokens from URL hash
+        // Extract tokens and error params from URL hash
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
         const accessToken = hashParams.get('access_token');
         const refreshToken = hashParams.get('refresh_token');
         const type = hashParams.get('type');
+        const hashError = hashParams.get('error');
+        const errorCode = hashParams.get('error_code');
+        const errorDescription = hashParams.get('error_description');
 
         console.log('Hash parameters:', { 
           hasAccessToken: !!accessToken, 
           hasRefreshToken: !!refreshToken,
           type,
+          hashError,
+          errorCode,
+          errorDescription,
           accessTokenLength: accessToken?.length,
           refreshTokenLength: refreshToken?.length
         });
+        
+        // Check for errors from Supabase (expired/already used links)
+        if (hashError) {
+          console.error('Auth confirm error:', { hashError, errorCode, errorDescription });
+          
+          // Clean up any leftover auth state
+          localStorage.removeItem('auth-phase-cleared');
+          localStorage.removeItem('auth-pending-tokens');
+          
+          // Create user-friendly error message
+          let message = errorDescription || hashError;
+          
+          // Customize message for common errors
+          if (errorCode === 'otp_expired' || hashError === 'access_denied') {
+            message = 'This magic link has expired or has already been used. Please request a new one.';
+          }
+          
+          const encodedMessage = encodeURIComponent(message);
+          console.log('Redirecting to login with error:', message);
+          
+          // Use window.location.href for a full page redirect
+          window.location.href = `/login?error=auth_failed&message=${encodedMessage}`;
+          return;
+        }
 
         if (!accessToken || !refreshToken) {
           console.error('No auth tokens found in URL hash');
           console.error('This should not happen - tokens should be in hash after reload');
           // Clear the flag if tokens are missing
           localStorage.removeItem('auth-phase-cleared');
-          setErrorMessage('No authentication tokens found in the confirmation link.');
-          setStatus('error');
+          localStorage.removeItem('auth-pending-tokens');
+          
+          const message = 'No authentication tokens found in the confirmation link.';
+          console.log('Redirecting to login with error:', message);
+          window.location.href = `/login?error=auth_failed&message=${encodeURIComponent(message)}`;
           return;
         }
         
@@ -189,8 +221,10 @@ export default function ConfirmPage() {
           console.error('savedTokens from localStorage:', !!savedTokens);
           localStorage.removeItem('auth-phase-cleared');
           localStorage.removeItem('auth-pending-tokens');
-          setErrorMessage('Authentication tokens were lost. Please try clicking the link again.');
-          setStatus('error');
+          
+          const message = 'Authentication tokens were lost. Please try clicking the link again.';
+          console.log('Redirecting to login with error:', message);
+          window.location.href = `/login?error=auth_failed&message=${encodeURIComponent(message)}`;
           return;
         }
         
@@ -206,8 +240,9 @@ export default function ConfirmPage() {
           // Clear the flags so user can try again
           localStorage.removeItem('auth-phase-cleared');
           localStorage.removeItem('auth-pending-tokens');
-          setErrorMessage(error.message);
-          setStatus('error');
+          
+          console.log('Redirecting to login with error:', error.message);
+          window.location.href = `/login?error=auth_failed&message=${encodeURIComponent(error.message)}`;
           return;
         }
 
@@ -235,16 +270,26 @@ export default function ConfirmPage() {
           console.error('❌ No user data returned');
           localStorage.removeItem('auth-phase-cleared');
           localStorage.removeItem('auth-pending-tokens');
-          setErrorMessage('Failed to establish user session.');
-          setStatus('error');
+          
+          const message = 'Failed to establish user session.';
+          console.log('Redirecting to login with error:', message);
+          window.location.href = `/login?error=auth_failed&message=${encodeURIComponent(message)}`;
         }
       } catch (err) {
         console.error('Unexpected error:', err);
+        console.error('Error details:', {
+          message: (err as Error)?.message,
+          stack: (err as Error)?.stack,
+          type: typeof err
+        });
+        
         // Clear flags on error so user can try again
         localStorage.removeItem('auth-phase-cleared');
         localStorage.removeItem('auth-pending-tokens');
-        setErrorMessage('An unexpected error occurred during authentication.');
-        setStatus('error');
+        
+        const errorMessage = (err as Error)?.message || 'An unexpected error occurred during authentication.';
+        console.log('Redirecting to login with error:', errorMessage);
+        window.location.href = `/login?error=auth_failed&message=${encodeURIComponent(errorMessage)}`;
       }
     };
 
@@ -290,29 +335,7 @@ export default function ConfirmPage() {
     );
   }
 
-  if (status === 'error') {
-    return (
-      <Box
-        display="flex"
-        flexDirection="column"
-        alignItems="center"
-        justifyContent="center"
-        minHeight="100vh"
-        gap={2}
-        p={3}
-      >
-        <Typography variant="h5" color="error.main">
-          Authentication Failed
-        </Typography>
-        <Typography variant="body1" color="text.secondary" textAlign="center">
-          {errorMessage}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Please try requesting a new magic link.
-        </Typography>
-      </Box>
-    );
-  }
-
+  // Error state is now handled by redirecting to login page with error message
+  // No need to show error UI here
   return null;
 }

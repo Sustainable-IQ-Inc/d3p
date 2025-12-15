@@ -150,10 +150,23 @@ class TestUtilityFunctions:
     
     def test_sanitize_filename(self):
         """Test filename sanitization"""
+        # Basic tests
         assert sanitize_filename('file name.txt') == 'file_name.txt'
         assert sanitize_filename('file*name?.txt') == 'filename.txt'
         assert sanitize_filename('file\\name/test.txt') == 'filenametest.txt'
         assert sanitize_filename('file:name<test>.txt') == 'filenametest.txt'
+        
+        # Enhanced tests for special characters that were causing issues
+        assert sanitize_filename('report (final).pdf') == 'report_final.pdf'
+        assert sanitize_filename('file (with parentheses).xlsx') == 'file_with_parentheses.xlsx'
+        assert sanitize_filename('My Report (Draft-2023).pdf') == 'My_Report_Draft-2023.pdf'
+        
+        # Test that dashes and underscores are preserved
+        assert sanitize_filename('file-with-dashes.pdf') == 'file-with-dashes.pdf'
+        assert sanitize_filename('file_with_underscores.pdf') == 'file_with_underscores.pdf'
+        
+        # Test multiple consecutive underscores are collapsed
+        assert sanitize_filename('Test___Multiple.xlsx') == 'Test_Multiple.xlsx'
     
     @patch('utils.supabase')
     def test_get_field_name_from_use_type(self, mock_supabase):
