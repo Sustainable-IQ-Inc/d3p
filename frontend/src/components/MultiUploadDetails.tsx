@@ -13,6 +13,8 @@ import EnumList from "components/enums/enum_list";
 import YearField from "components/YearField";
 import ReportingYearField from "components/ReportingYearField";
 import DeleteIcon from "@mui/icons-material/Delete";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import Tooltip from "@mui/material/Tooltip";
 import { message } from "antd";
 import Link from "next/link";
 
@@ -34,12 +36,14 @@ interface KeyMetricFields {
   total_energy: number;
   climate_zone: string;
   file_name: string;
+  file_url?: string;
 }
 interface FileData extends KeyMetricFields {
   id: number;
   upload_id: number;
   visible?: boolean;
   baseline_file_data?: FileData;
+  upload_attempted?: boolean;
 }
 export type PrepopulatedDataProps = {
   project_use_type_id: number;
@@ -62,6 +66,7 @@ interface RecordData extends KeyMetricFields {
   project_id: UUID;
   year: number;
   reporting_year: number;
+  upload_attempted?: boolean;
 }
 
 const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
@@ -97,34 +102,45 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
         rowData.baseline_file_data.id !== undefined
           ? rowData.baseline_file_data.id
           : null,
-      design_eeu_id: rowData.id,
+      design_eeu_id: rowData.id !== undefined ? rowData.id : null,
       year: rowData.year,
       reporting_year: rowData.reporting_year,
       use_type_subtype_id:
         rowData.use_type_subtype_id !== undefined
           ? rowData.use_type_subtype_id
           : null,
+      // Include file_url and file_name for failed uploads so admins can download them
+      file_url: rowData.file_url,
+      file_name: rowData.file_name,
     };
 
     (async () => {
-      const status = await submitUpload({ uploadProps: submitData });
+      try {
+        const status = await submitUpload({ uploadProps: submitData });
 
-      if (status === "success") {
-        message.success(
-          <Typography>
-            Project submitted successfully.
-            <br />
-            <Link
-              href={`/projects/${submitData.project_id}`}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              View Details
-            </Link>
-          </Typography>
-        );
+        if (status === "success") {
+          message.success(
+            <Typography>
+              Project submitted successfully.
+              <br />
+              <Link
+                href={`/projects/${submitData.project_id}`}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                View Details
+              </Link>
+            </Typography>
+          );
 
-        remove(index); // remove the row from the array
+          remove(index); // remove the row from the array
+        } else {
+          message.error("Failed to submit project. Please try again.");
+        }
+      } catch (error: any) {
+        console.error("Error submitting project:", error);
+        const errorMessage = error?.message || error?.response?.data?.error || "An error occurred while submitting the project. Please check the console for details.";
+        message.error(errorMessage);
       }
     })();
     // This is just a placeholder. Replace it with your actual submit logic.
@@ -169,6 +185,8 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
       const updatedUploads = data.uploads.map((upload: any) => ({
         ...upload,
         baseline_file_data: null,
+        // Mark upload as attempted if there's an id OR if it's a failed upload
+        upload_attempted: upload.id !== undefined || upload.upload_attempted === true,
         // Ensure year and reporting_year are properly initialized
         year: upload.year || currentYear,
         reporting_year: upload.reporting_year || currentYear,
@@ -180,10 +198,32 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
         has_subtypes: upload.has_subtypes || false,
         project_id: upload.project_id || "00000000-0000-0000-0000-000000000000",
       }));
+      
+      // Add failed uploads as records with upload_attempted = true but no id
+      const failedUploadRecords = (data.failed_uploads || []).map((failedUpload: any) => ({
+        id: undefined,
+        upload_attempted: true,
+        file_name: failedUpload.file_name || failedUpload.response?.file_name || 'Unknown file',
+        file_url: failedUpload.file_url || failedUpload.response?.url,  // Include file URL for download
+        baseline_file_data: null,
+        year: currentYear,
+        reporting_year: currentYear,
+        project_use_type_id: 0,
+        project_phase_id: 0,
+        project_construction_category_id: 0,
+        energy_code_id: 0,
+        has_subtypes: false,
+        project_id: "00000000-0000-0000-0000-000000000000",
+        use_type_total_area: 0,
+        total_energy: 0,
+        climate_zone: '',
+      }));
 
       console.log("Updated uploads with proper year initialization:", updatedUploads);
+      console.log("Failed upload records:", failedUploadRecords);
 
-      setUploads([...updatedUploads]);
+      const allRecords = [...updatedUploads, ...failedUploadRecords];
+      setUploads(allRecords);
 
       const updatedBaselineFiles = Array.isArray(data.unmatched_baseline_files)
         ? data.unmatched_baseline_files.map((file: any) => ({
@@ -192,7 +232,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
           }))
         : [];
       setBaselineFiles([...updatedBaselineFiles]);
-      setInitialValues({ records: [...updatedUploads] });
+      setInitialValues({ records: allRecords });
     } else {
       setUploads([]);
       setBaselineFiles([]);
@@ -212,6 +252,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
             total_energy: 0,
             climate_zone: "",
             file_name: "",
+            file_url: undefined,
             project_id: "00000000-0000-0000-0000-000000000000",
             baseline_file_data: null,
           },
@@ -361,10 +402,53 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                               climate_zone={record.climate_zone}
                               file_name={record.file_name}
                             />
+                          ) : values.records[index].upload_attempted && values.records[index].file_name ? (
+                            <div style={{ 
+                              padding: "16px", 
+                              border: "1px solid #ff9800", 
+                              borderRadius: "4px", 
+                              backgroundColor: "#fff3e0",
+                              marginTop: "8px"
+                            }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <Tooltip title="File upload failed. The file could not be automatically processed. Please ensure it's a valid energy modeling report. Admin will review this upload.">
+                                  <WarningAmberIcon style={{ color: "#ff9800", fontSize: "24px" }} />
+                                </Tooltip>
+                                <Typography variant="body1" style={{ color: "#e65100", fontWeight: 500 }}>
+                                  {values.records[index].file_name}
+                                </Typography>
+                              </div>
+                              <Typography variant="caption" style={{ color: "#bf360c", marginTop: "4px", display: "block" }}>
+                                File uploaded but not processed Automatically. You can still complete the form and we will update you once it is processed.
+                              </Typography>
+                            </div>
                           ) : (
                             <FileDropzone
                               onUploadStatusChange={(status, response) => {
-                                if (status === "done") {
+                                if (status === "done" || status === "warning") {
+                                  // Check if this is a failed upload that allows form completion
+                                  if (status === "warning" && response && response.status === 'error' && response.allow_form_completion) {
+                                    // Failed upload - mark as attempted but don't set id
+                                    setFieldValue(
+                                      `records.${index}.upload_attempted`,
+                                      true
+                                    );
+                                    if (response.file_name) {
+                                      setFieldValue(
+                                        `records.${index}.file_name`,
+                                        response.file_name
+                                      );
+                                    }
+                                    // Capture file_url so admin can download it later
+                                    if (response.url) {
+                                      setFieldValue(
+                                        `records.${index}.file_url`,
+                                        response.url
+                                      );
+                                    }
+                                    return;
+                                  }
+                                  
                                   // Check if this is a PRM report (report_type 8)
                                   if (response.report_type === 8) {
                                     // For PRM reports, we get both baseline and design data
@@ -390,6 +474,13 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                       `records.${index}.file_name`,
                                       designData.file_name
                                     );
+                                    // Capture file_url for future downloads
+                                    if (response.url) {
+                                      setFieldValue(
+                                        `records.${index}.file_url`,
+                                        response.url
+                                      );
+                                    }
                                     
                                     // Set baseline data automatically
                                     const baselineData = response.baseline;
@@ -401,6 +492,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                         use_type_total_area: baselineData.conditioned_area,
                                         climate_zone: baselineData.climate_zone,
                                         file_name: baselineData.file_name,
+                                        file_url: response.url,  // Include URL for baseline too
                                         visible: false
                                       }
                                     );
@@ -426,6 +518,13 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                       `records.${index}.file_name`,
                                       response.file_name
                                     );
+                                    // Capture file_url for future downloads
+                                    if (response.url) {
+                                      setFieldValue(
+                                        `records.${index}.file_url`,
+                                        response.url
+                                      );
+                                    }
                                   }
                                 }
                               }}
@@ -520,7 +619,28 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                       status,
                                       response
                                     ) => {
-                                      if (status === "done") {
+                                      if (selectedRecordIndex === null) {
+                                        return;
+                                      }
+                                      
+                                      if (status === "done" || status === "warning") {
+                                        // Check if this is a failed upload that allows form completion
+                                        if (status === "warning" && response && response.status === 'error' && response.allow_form_completion) {
+                                          // Failed upload - mark baseline as attempted but don't set id
+                                          const currentBaseline = values.records[selectedRecordIndex].baseline_file_data;
+                                          setFieldValue(
+                                            `records.${selectedRecordIndex}.baseline_file_data`,
+                                            {
+                                              ...(currentBaseline || {}),
+                                              upload_attempted: true,
+                                              file_name: response.file_name || currentBaseline?.file_name,
+                                              file_url: response.url || currentBaseline?.file_url  // Capture URL
+                                            }
+                                          );
+                                          handleClose();
+                                          return;
+                                        }
+                                        
                                         // Check if this is a PRM report (report_type 8)
                                         if (response.report_type === 8) {
                                           // For PRM reports, use baseline data for baseline field
@@ -533,6 +653,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                               use_type_total_area: baselineData.conditioned_area,
                                               climate_zone: baselineData.climate_zone,
                                               file_name: baselineData.file_name,
+                                              file_url: response.url,  // Capture URL
                                               visible: false
                                             }
                                           );
@@ -546,6 +667,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                               use_type_total_area: response.conditioned_area,
                                               climate_zone: response.climate_zone,
                                               file_name: response.file_name,
+                                              file_url: response.url,  // Capture URL
                                               visible: false
                                             }
                                           );
@@ -564,7 +686,8 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                             <div>
                               <b>Baseline File</b>
 
-                              {values.records[index].baseline_file_data && (
+                              {values.records[index].baseline_file_data && 
+                               values.records[index].baseline_file_data?.id ? (
                                 <ProjectCard
                                   total_energy={
                                     values.records[index]?.baseline_file_data
@@ -601,7 +724,28 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                     handleClose();
                                   }}
                                 />
-                              )}
+                              ) : values.records[index].baseline_file_data?.upload_attempted && 
+                                 values.records[index].baseline_file_data?.file_name ? (
+                                <div style={{ 
+                                  padding: "16px", 
+                                  border: "1px solid #ff9800", 
+                                  borderRadius: "4px", 
+                                  backgroundColor: "#fff3e0",
+                                  marginTop: "8px"
+                                }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                    <Tooltip title="File upload failed. The file could not be automatically processed. Please ensure it's a valid energy modeling report. Admin will review this upload.">
+                                      <WarningAmberIcon style={{ color: "#ff9800", fontSize: "24px" }} />
+                                    </Tooltip>
+                                    <Typography variant="body1" style={{ color: "#e65100", fontWeight: 500 }}>
+                                      {values.records[index].baseline_file_data?.file_name}
+                                    </Typography>
+                                  </div>
+                                  <Typography variant="caption" style={{ color: "#bf360c", marginTop: "4px", display: "block" }}>
+                                    File uploaded but not processed. You can still complete the form.
+                                  </Typography>
+                                </div>
+                              ) : null}
                             </div>
                           )}
                         </td>
@@ -782,7 +926,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                               !values.records[index]
                                 .project_construction_category_id ||
                               !values.records[index].energy_code_id ||
-                              !values.records[index].id
+                              (!values.records[index].id && !values.records[index].upload_attempted && !values.records[index].baseline_file_data?.upload_attempted)
                             }
                           >
                             Submit
@@ -841,6 +985,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                   total_energy: 0,
                                   climate_zone: "",
                                   file_name: "",
+                                  file_url: undefined,
                                   project_id: "00000000-0000-0000-0000-000000000000",
                                   baseline_file_data: null,
                                 });

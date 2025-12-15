@@ -101,10 +101,12 @@ async def verify_token(req: Request):
         user_company_id = data.user.user_metadata['company_id']
         user_role = data.user.user_metadata.get('role', 'NA')
         user_id = data.user.id
+        user_email = data.user.email  # Get email directly from auth token
         return {'is_authorized': True, 
                 'company_id': user_company_id, 
                 'role': user_role, 
-                'user_id': user_id}
+                'user_id': user_id,
+                'user_email': user_email}
     except:
         print ("error with authentication")
         return {'is_authorized': False}   

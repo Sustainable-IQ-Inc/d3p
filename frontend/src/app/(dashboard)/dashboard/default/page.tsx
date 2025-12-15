@@ -14,6 +14,7 @@ import {
 // project import
 import MainCard from "components/MainCard";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 
 const UmbrellaTable = dynamic(() => import("components/Umbrella"), {
   ssr: false,
@@ -25,6 +26,7 @@ import UnitSelector from "components/UnitSelector";
 import CompanyDropdown from "components/CompanySelector";
 import {  useDataReload } from "contexts/ProjectDataReload";
 import ExportProjectsButton from "components/ExportProjectsButton";
+import { getPendingUploads } from "app/api/GetPendingUploads";
 
 // assets
 
@@ -47,6 +49,7 @@ const DashboardDefault = () => {
   const { reloadData } = useDataReload();
   const [measurementSystem, setMeasurementSystem] = useState("Imperial");
   const [companyView, setCompanyView] = useState(user.companyId);
+  const [pendingUploadsCount, setPendingUploadsCount] = useState<number>(0);
 
   const fetchProjects = (measurementSystem: string) => {
     setIsLoading(true);
@@ -66,6 +69,17 @@ const DashboardDefault = () => {
   useEffect(() => {
     fetchProjects(measurementSystem); // Modify this line
   }, [measurementSystem, companyView,reloadData]); // Modify this line
+
+  useEffect(() => {
+    getPendingUploads()
+      .then((uploads) => {
+        setPendingUploadsCount(Array.isArray(uploads) ? uploads.length : 0);
+      })
+      .catch((error) => {
+        console.error("Error fetching pending uploads count:", error);
+        setPendingUploadsCount(0);
+      });
+  }, [reloadData]);
 
   const columns: ColumnDef<TableDataProps>[] = [
     {
@@ -188,9 +202,26 @@ const DashboardDefault = () => {
         {/* row 3 */}
         <Grid item xs={12} sm={12} md={12} lg={12} xl={12}>
           <Grid container alignItems="center" justifyContent="space-between">
-            <Grid item />
+            <Grid item>
+              <Typography variant="h4">
+                Projects
+              </Typography>
+            </Grid>
             <Grid item>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Link href="/pending-uploads" style={{ textDecoration: 'none' }}>
+                  <Typography 
+                    variant="body1" 
+                    sx={{ 
+                      color: 'primary.main',
+                      '&:hover': { 
+                        textDecoration: 'underline' 
+                      } 
+                    }}
+                  >
+                    Pending Uploads ({pendingUploadsCount})
+                  </Typography>
+                </Link>
                 <UnitSelector
                   measurementSystem={measurementSystem}
                   setMeasurementSystem={setMeasurementSystem}

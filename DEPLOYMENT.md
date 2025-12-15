@@ -287,6 +287,9 @@ The deployment workflow uses environment-specific secrets to support separate st
 - `GCP_PROJECT_ID`: Your GCP project ID
 - `SIGNING_SA_CREDENTIALS`: Base64 encoded contents of the `signing-key.json` file (shared across environments)
   - **Important**: Encode the file before adding to GitHub: `base64 -w 0 signing-key.json`
+- `SENDGRID_API_KEY`: Your SendGrid API key for sending emails
+- `SENDGRID_FROM_EMAIL`: The email address to send emails from (must be verified in SendGrid)
+- `ADMIN_EMAILS`: Comma-separated list of admin email addresses for notifications
 
 #### Staging Environment Secrets:
 - `STAGING_SUPABASE_URL`: Your staging Supabase project URL

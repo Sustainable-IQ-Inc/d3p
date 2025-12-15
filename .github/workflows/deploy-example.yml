@@ -41,3 +41,8 @@ jobs:
       
       # Optional: Override the default frontend URL (environment-specific)
       REDIRECT_URL: ${{ inputs.environment == 'prod' && secrets.PROD_REDIRECT_URL || secrets.STAGING_REDIRECT_URL }}
+      
+      # Email Configuration (common across environments)
+      SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+      SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
+      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}

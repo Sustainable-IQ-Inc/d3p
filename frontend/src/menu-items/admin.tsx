@@ -14,6 +14,12 @@ const pages: NavItemType = {
       type: "item",
       url: "/admin/companies",
     },
+    {
+      id: "failed-uploads",
+      title: "Failed Uploads",
+      type: "item",
+      url: "/admin/failed-uploads",
+    },
   ],
 };
 

@@ -9,6 +9,8 @@ import ProjectDetailSection from "components/ProjectDetailSection";
 import NavigateNextIcon from "@mui/icons-material/NavigateNext";
 import ChangeHistory from "components/ProjectChangeHistory";
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import Alert from '@mui/material/Alert';
 
 // project import
 
@@ -392,6 +394,33 @@ const ProjectDetailView = ({ params }: { params: { id: string } }) => {
               </>
             )}
           </Box>
+
+          {/* Processing Error Banner */}
+          {data && data[0]?.processing_error && (
+            <Alert 
+              severity="error" 
+              icon={<ErrorOutlineIcon fontSize="inherit" />}
+              sx={{ 
+                mb: 3,
+                '& .MuiAlert-message': {
+                  width: '100%'
+                }
+              }}
+            >
+              <Typography variant="h6" gutterBottom>
+                Processing Error
+              </Typography>
+              <Typography variant="body2">
+                This project has files that could not be processed automatically. The error was:
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1, fontFamily: 'monospace', bgcolor: 'rgba(0,0,0,0.05)', p: 1, borderRadius: 1 }}>
+                {data[0].processing_error}
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Please check the file format and try uploading again, or contact support for assistance.
+              </Typography>
+            </Alert>
+          )}
 
           <Grid container rowSpacing={4.5} columnSpacing={2.75} sx={{ paddingBottom: "10px" }}>
             <Grid item xs={12} lg={3} sm={6}>

@@ -149,6 +149,16 @@ case $choice in
             print_warning "signing-key.json not found at $signing_key_file"
         fi
         
+        # Email Configuration (common across environments)
+        sendgrid_api_key=$(prompt_for_value "SendGrid API Key")
+        set_secret "SENDGRID_API_KEY" "$sendgrid_api_key"
+        
+        sendgrid_from_email=$(prompt_for_value "SendGrid From Email")
+        set_secret "SENDGRID_FROM_EMAIL" "$sendgrid_from_email"
+        
+        admin_emails=$(prompt_for_value "Admin Emails (comma-separated)")
+        set_secret "ADMIN_EMAILS" "$admin_emails"
+        
         echo ""
         print_info "=== Staging Environment Secrets ==="
         echo ""
@@ -254,6 +264,16 @@ case $choice in
         signing_key_file=${signing_key_file:-./signing-key.json}
         set_secret_from_file_base64 "SIGNING_SA_CREDENTIALS" "$signing_key_file"
         
+        # Email Configuration
+        sendgrid_api_key=$(prompt_for_value "SendGrid API Key")
+        set_secret "SENDGRID_API_KEY" "$sendgrid_api_key"
+        
+        sendgrid_from_email=$(prompt_for_value "SendGrid From Email")
+        set_secret "SENDGRID_FROM_EMAIL" "$sendgrid_from_email"
+        
+        admin_emails=$(prompt_for_value "Admin Emails (comma-separated)")
+        set_secret "ADMIN_EMAILS" "$admin_emails"
+        
         print_success "Common secrets have been set!"
         ;;
         
@@ -341,6 +361,11 @@ case $choice in
         [ -n "$GCP_SA_KEY_FILE" ] && set_secret_from_file "GCP_SA_KEY" "$GCP_SA_KEY_FILE"
         [ -n "$GCP_PROJECT_ID" ] && set_secret "GCP_PROJECT_ID" "$GCP_PROJECT_ID"
         [ -n "$SIGNING_SA_KEY_FILE" ] && set_secret_from_file_base64 "SIGNING_SA_CREDENTIALS" "$SIGNING_SA_KEY_FILE"
+        
+        # Email Configuration (common across environments)
+        [ -n "$SENDGRID_API_KEY" ] && set_secret "SENDGRID_API_KEY" "$SENDGRID_API_KEY"
+        [ -n "$SENDGRID_FROM_EMAIL" ] && set_secret "SENDGRID_FROM_EMAIL" "$SENDGRID_FROM_EMAIL"
+        [ -n "$ADMIN_EMAILS" ] && set_secret "ADMIN_EMAILS" "$ADMIN_EMAILS"
         
         # Staging secrets
         [ -n "$STAGING_SUPABASE_URL" ] && set_secret "STAGING_SUPABASE_URL" "$STAGING_SUPABASE_URL"
