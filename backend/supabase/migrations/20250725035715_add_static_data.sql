@@ -52,7 +52,8 @@ INSERT INTO "public"."ddx_energy_codes" ("id", "created_at", "ddx_energy_code") 
 	(46, '2025-06-08 04:43:59.439093+00', 'Oregon Energy Code Residential 2021'),
 	(47, '2025-06-08 04:43:59.439093+00', 'Washington Energy Code Non Residential 2021'),
 	(48, '2025-06-08 04:43:59.439093+00', '2020 CoBECC 41.4'),
-	(49, '2025-06-08 04:43:59.439093+00', '2021 Seattle Energy Code')
+	(49, '2025-06-08 04:43:59.439093+00', '2021 Seattle Energy Code'),
+	(50, '2025-12-18 00:00:00.000000+00', 'ASHRAE 90.1-2022')
 ON CONFLICT (id) DO UPDATE SET
 	created_at = EXCLUDED.created_at,
 	ddx_energy_code = EXCLUDED.ddx_energy_code;

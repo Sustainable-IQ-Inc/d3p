@@ -171,7 +171,6 @@ def create_failed_upload_record(
         logging_start.logger.info(f"Created failed upload record {upload_id}")
         
         # Now create eeu_data record with file_url and link it via upload_id
-        # Note: company_id is tracked via uploads table, not eeu_data
         eeu_data = {
             'file_url': file_url,
             'file_name': file_name,
@@ -179,6 +178,11 @@ def create_failed_upload_record(
             'baseline_design': baseline_design,
             # Will be updated with energy data when reprocessed
         }
+        # Add user_id and company_id
+        if user_id:
+            eeu_data['user_id'] = user_id
+        if company_id:
+            eeu_data['company_id'] = company_id
         
         eeu_insert_result, _ = supabase.table('eeu_data')\
             .insert(eeu_data)\
@@ -376,6 +380,12 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
     eeu_data_to_insert[0]['file_name'] = file_name
     eeu_data_to_insert[0]['file_url'] = url
     
+    # Add user_id and company_id if provided
+    if user_id:
+        eeu_data_to_insert[0]['user_id'] = user_id
+    if company_id:
+        eeu_data_to_insert[0]['company_id'] = company_id
+    
     print(f"DEBUG: Final data to insert: {eeu_data_to_insert}")
     
     try:
@@ -524,7 +534,8 @@ async def create_upload_file(item: models.ReportUpload = Depends(), authorized: 
                 try:
                     from multi_project_service import create_multi_project_service
                     service = create_multi_project_service()
-                    result = service.process_multi_project_excel(url, item.company_id)
+                    user_id = authorized.get('user_id')
+                    result = service.process_multi_project_excel(url, item.company_id, user_id)
                     
                     return {
                         'status': result['status'],
@@ -577,7 +588,8 @@ async def submit_multi_project_excel(item: models.MultiProjectExcelUpload, autho
         from multi_project_service import create_multi_project_service
         
         service = create_multi_project_service()
-        result = service.process_multi_project_excel(item.file_url, item.company_id)
+        user_id = authorized.get('user_id')
+        result = service.process_multi_project_excel(item.file_url, item.company_id, user_id)
         
         return models.MultiProjectResult(
             status=result['status'],
@@ -840,11 +852,10 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
         # For failed uploads, file_url should be in the uploads table (set by create_failed_upload_record)
         # Keep file_url/file_name if provided (for failed uploads being resubmitted)
         
-        # Always set company_id (user_id is bigint in uploads table, but we have UUID from auth)
-        # The user_id field in uploads references the old users table, so we'll leave it NULL
-        # and rely on company_id for filtering
+        # Always set company_id and auth_user_id (UUID from auth system)
         item_data['company_id'] = company_id
-        # Don't set user_id - it's a bigint foreign key to users table, not UUID from auth
+        if user_id:
+            item_data['auth_user_id'] = user_id
 
         extract_dict = {}
 

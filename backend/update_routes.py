@@ -48,7 +48,7 @@ def update_project_record(item,user_id):
     item_data = item.model_dump(exclude_none=True)
     project_id = item_data.pop('project_id')
     
-    # Remove user_id from item_data - it's not a column in projects table, only used for history
+    # Remove user_id from item_data - it's stored in projects table but shouldn't be updated (only used for history tracking)
     item_data.pop('user_id', None)
     
     print(f"update_project_record called with item_data keys: {list(item_data.keys())}")

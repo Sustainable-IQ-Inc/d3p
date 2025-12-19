@@ -295,6 +295,10 @@ async def create_project(item: models.CreateProject, authorized: Dict[str, Union
 
     if authorized['is_authorized']:
         item_data = item.model_dump()
+        # Add user_id from authorization
+        user_id = authorized.get('user_id')
+        if user_id:
+            item_data['user_id'] = user_id
 
         try:
             data, count = supabase.table('projects')\

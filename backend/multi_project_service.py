@@ -12,13 +12,14 @@ class MultiProjectService:
         self.supabase = supabase_client
         self.parser = MultiProjectExcelParser()
     
-    def process_multi_project_excel(self, file_url: str, company_id: str) -> Dict[str, Any]:
+    def process_multi_project_excel(self, file_url: str, company_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Process multi-project Excel file and create projects/uploads
         
         Args:
             file_url: URL to the Excel file
             company_id: ID of the company
+            user_id: ID of the authenticated user (UUID)
             
         Returns:
             Dictionary with processing results
@@ -70,7 +71,7 @@ class MultiProjectService:
             
             for project in validated_projects:
                 try:
-                    project_id = self._create_project_and_upload(project, company_id, file_url)
+                    project_id = self._create_project_and_upload(project, company_id, file_url, user_id)
                     if project_id:
                         created_project_ids.append(project_id)
                         created_projects.append({
@@ -110,7 +111,7 @@ class MultiProjectService:
                 'created_project_ids': []
             }
     
-    def _create_project_and_upload(self, project_data: Dict[str, Any], company_id: str, file_url: str) -> Optional[str]:
+    def _create_project_and_upload(self, project_data: Dict[str, Any], company_id: str, file_url: str, user_id: Optional[str] = None) -> Optional[str]:
         """
         Create a project and associated upload record
         
@@ -118,6 +119,7 @@ class MultiProjectService:
             project_data: Parsed project data
             company_id: Company ID
             file_url: Original file URL
+            user_id: Authenticated user ID (UUID)
             
         Returns:
             Created project ID or None if failed
@@ -170,6 +172,9 @@ class MultiProjectService:
                     'project_construction_category_id': enum_mappings.get('project_construction_category_id'),
                     'project_use_type_id': enum_mappings.get('project_use_type_id')
                 }
+                # Add user_id if provided
+                if user_id:
+                    project_record['user_id'] = user_id
                 project_record = {k: v for k, v in project_record.items() if v is not None}
                 project_result = self.supabase.table('projects').insert(project_record).execute()
                 if not project_result or not getattr(project_result, 'data', None):
@@ -178,7 +183,7 @@ class MultiProjectService:
             
             # Create upload record with energy data
             upload_record = self._create_upload_record(
-                project_data, project_id, company_id, enum_mappings, file_url
+                project_data, project_id, company_id, enum_mappings, file_url, user_id
             )
             
             upload_result = self.supabase.table('uploads').insert(upload_record).execute()
@@ -196,14 +201,14 @@ class MultiProjectService:
             design_energy_fields = self._extract_energy_fields(project_data, 'design')
             
             if baseline_energy_fields:
-                baseline_eeu_record = self._create_eeu_record(project_data, upload_result.data[0]['id'], baseline_energy_fields, 'baseline')
+                baseline_eeu_record = self._create_eeu_record(project_data, upload_result.data[0]['id'], baseline_energy_fields, 'baseline', user_id, company_id)
                 baseline_eeu_result = self.supabase.table('eeu_data').insert(baseline_eeu_record).execute()
                 
                 if not baseline_eeu_result.data:
                     logging_start.logger.warning(f"Failed to create baseline EEU data for project {project_id}")
             
             if design_energy_fields:
-                design_eeu_record = self._create_eeu_record(project_data, upload_result.data[0]['id'], design_energy_fields, 'design')
+                design_eeu_record = self._create_eeu_record(project_data, upload_result.data[0]['id'], design_energy_fields, 'design', user_id, company_id)
                 design_eeu_result = self.supabase.table('eeu_data').insert(design_eeu_record).execute()
                 
                 if not design_eeu_result.data:
@@ -251,7 +256,7 @@ class MultiProjectService:
     
     def _create_upload_record(self, project_data: Dict[str, Any], project_id: str, 
                             company_id: str, enum_mappings: Dict[str, Optional[int]], 
-                            file_url: str) -> Dict[str, Any]:
+                            file_url: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Create upload record"""
         upload_record = {
             'project_id': project_id,
@@ -269,6 +274,9 @@ class MultiProjectService:
             'id_uuid': str(uuid.uuid4())
             # Note: upload_status_id removed since enum_upload_statuses table is empty
         }
+        # Add auth_user_id if provided (UUID from auth system)
+        if user_id:
+            upload_record['auth_user_id'] = user_id
         
         # Remove None values
         return {k: v for k, v in upload_record.items() if v is not None}
@@ -307,7 +315,8 @@ class MultiProjectService:
         return energy_fields
     
     def _create_eeu_record(self, project_data: Dict[str, Any], upload_id: int, 
-                          energy_fields: Dict[str, float], baseline_design: str = 'design') -> Dict[str, Any]:
+                          energy_fields: Dict[str, float], baseline_design: str = 'design',
+                          user_id: Optional[str] = None, company_id: Optional[str] = None) -> Dict[str, Any]:
         """Create EEU data record with calculated totals"""
         # Get weather information for location data
         weather_info = self._get_weather_info(project_data)
@@ -347,6 +356,12 @@ class MultiProjectService:
             'egrid_subregion': weather_info.get('egrid_subregion', ''),
             'baseline_design': baseline_design
         }
+        
+        # Add user_id and company_id if provided
+        if user_id:
+            eeu_record['user_id'] = user_id
+        if company_id:
+            eeu_record['company_id'] = company_id
         
         # Add energy fields
         eeu_record.update(energy_fields)
