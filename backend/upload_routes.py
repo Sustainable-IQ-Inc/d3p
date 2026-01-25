@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
+import requests
+import asyncio
+import json
 import models
 from utils import verify_token, add_event_history, supabase, sanitize_filename
 from typing import Optional, Dict, Union
@@ -271,6 +274,14 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
         errors = results[1] if len(results) > 1 else []
         warnings = results[2] if len(results) > 2 else []
         
+        
+        
+        # Check if dynamic parsing is enabled and this is a failure/pending state
+        env_val = os.environ.get('DYNAMIC_PARSING_ENABLED', 'false')
+        print(f"DEBUG: DYNAMIC_PARSING_ENABLED env var is: '{env_val}'")
+        can_dynamic_parse = env_val.lower() == 'true'
+        print(f"DEBUG: can_dynamic_parse evaluates to: {can_dynamic_parse}")
+        
         if status in ["pending", "ERROR"]:
             print(f"ERROR: Processing failed with status: {status}, errors: {errors}")
             errors_flat = [item for sublist in errors for item in sublist] if errors and len(errors) > 0 and isinstance(errors[0], list) else errors
@@ -293,12 +304,22 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
                     logging_start.logger.error(f"Failed to move file {file_name} to failed_uploads folder")
             else:
                 logging_start.logger.warning(f"Not creating failed upload record - missing user_id or company_id. user_id: {user_id}, company_id: {company_id}")
-            return {
+            
+            response = {
                 'status': 'error',
                 'errors': error_msg,
                 'warnings': '\n'.join(warnings_flat) if warnings_flat else '',
                 'message': f'File processing failed with status: {status}'
             }
+            
+            # Add dynamic parsing flag if enabled
+            if can_dynamic_parse:
+                response['can_dynamic_parse'] = True
+                # Use the failed_url if available, otherwise fallback to original url
+                response['file_url'] = failed_url if 'failed_url' in locals() and failed_url else url
+                response['file_name'] = file_name
+                
+            return response
     else:
         print(f"DEBUG: Results is a dict: {results}")
         # Dictionary format: {"status": "success", "df": df, "errors": [], "warnings": [], "report_type": int}
@@ -514,7 +535,8 @@ async def create_upload_file(item: models.ReportUpload = Depends(), authorized: 
             # Handle failed uploads - return error but allow form completion
             if isinstance(report_to_upload, dict) and report_to_upload.get('status') == 'error':
                 # Return error response but indicate form can still be completed
-                return {
+                # Return error response but indicate form can still be completed
+                error_response = {
                     'status': 'error',
                     'message': 'File could not be processed automatically. You can still complete the form below. We\'ll notify you when processing is complete.',
                     'errors': report_to_upload.get('errors', ''),
@@ -523,6 +545,16 @@ async def create_upload_file(item: models.ReportUpload = Depends(), authorized: 
                     'file_name': file_name,
                     'allow_form_completion': True
                 }
+                
+                # Pass through dynamic parsing flag
+                if report_to_upload.get('can_dynamic_parse'):
+                    error_response['can_dynamic_parse'] = True
+                    # Also ensure file_url is correct
+                    error_response['file_url'] = report_to_upload.get('file_url', url)
+                
+                return error_response
+
+
             
             # Check if the parsed report type is Multi-Project Excel (type 9)
             if (isinstance(report_to_upload, dict) and 
@@ -1114,3 +1146,245 @@ async def submit_project(item: models.SubmitProject, authorized: Dict[str, Union
 
     else:
         return "not authorized"
+
+@router.post("/trigger_dynamic_parsing/")
+async def trigger_dynamic_parsing(item: dict, authorized: Dict[str, Union[bool, Optional[str]]] = Depends(verify_token)):
+    """
+    Trigger dynamic parsing for a failed upload via the external parser service.
+    """
+    if not authorized['is_authorized']:
+        return {"status": "error", "message": "not authorized"}
+    
+    # Check if enabled
+    if os.environ.get('DYNAMIC_PARSING_ENABLED', 'false').lower() != 'true':
+        return {"status": "error", "message": "Dynamic parsing is not enabled"}
+    
+    # Mock AI Parsing for development
+    if os.environ.get('MOCK_AI_PARSING', 'false').lower() == 'true':
+        logging_start.logger.info("MOCK_AI_PARSING is enabled - returning mock dataset")
+        mock_result = {
+            "formatted_datasets": [
+                {
+                    "baseline_design_type": item.get("baseline_design", "design"),
+                    "formatted_data": {
+                        "use_type_total_area": {"value": 339604},
+                        "area_units": {"value": "sf"},
+                        "energy_units": {"value": "mbtu"},
+                        "Heating_Electricity": {"value": 0},
+                        "Heating_NaturalGas": {"value": 12195},
+                        "Cooling_Electricity": {"value": 4620},
+                        "Interior Lighting_Electricity": {"value": 2540},
+                        "Plug Loads_Electricity": {"value": 18774},
+                        "Fans_Electricity": {"value": 4073},
+                        "Pumps_Electricity": {"value": 1457},
+                        "Heat Rejection_Electricity": {"value": 90},
+                        "OtherEndUse_NaturalGas": {"value": 6546},
+                        "total_energy": 50339.7
+                    }
+                }
+            ],
+            "status": "completed"
+        }
+        return {
+            "status": "success",
+            "data": mock_result,
+            "message": "Mock parsing completed successfully"
+        }
+
+    file_url = item.get('file_url')
+    file_name = item.get('file_name', 'upload.pdf')
+    baseline_design = item.get('baseline_design', 'design')
+    model = item.get('model', 'gemini-2.5-pro')
+    
+    if not file_url:
+        return {"status": "error", "message": "file_url is required"}
+    
+    parser_url = os.environ.get('DYNAMIC_PARSER_URL', 'http://localhost:8000')
+    extract_endpoint = f"{parser_url}/api/v1/extract"
+    
+    try:
+        logging_start.logger.info(f"Triggering dynamic parsing for {file_name} at {extract_endpoint}")
+        
+        # Prepare request payload for dynamic parser
+        payload = {
+            "file_url": file_url,
+            "file_name": file_name,
+            "model": model,
+            "baseline_design": baseline_design,
+            "max_retries": 2,
+            "user_id": authorized.get('user_id')
+        }
+        
+        # Call the parser service with a timeout (e.g., 60 seconds)
+        # Note: In a real production env, this might be better as an async job
+        response = requests.post(extract_endpoint, json=payload, timeout=60)
+        
+        if response.status_code != 200:
+            logging_start.logger.error(f"Dynamic parser returned error: {response.status_code} - {response.text}")
+            return {
+                "status": "error", 
+                "message": f"Parser service failed: {response.text}"
+            }
+            
+        result = response.json()
+        
+        if result.get("status") == "completed":
+            
+            logging_start.logger.info(f"Parser returned success. Data keys: {list(result.keys())}")
+            logging_start.logger.info(result)
+            # Ensure "data" field contains the full result including formatted_datasets
+            return {
+                "status": "success",
+                "data": result, 
+                "message": "Dynamic parsing completed successfully"
+            }
+        else:
+            logging_start.logger.error(f"Parser returned incomplete status: {result.get('status')}")
+            return {
+                "status": "error",
+                "message": f"Dynamic parsing failed: {result.get('error', 'Unknown error')}",
+                "details": result
+            }
+            
+    except requests.exceptions.Timeout:
+        return {"status": "error", "message": "Parsing timed out after 60 seconds"}
+    except Exception as e:
+        logging_start.logger.error(f"Error calling dynamic parser: {str(e)}")
+        return {"status": "error", "message": f"Internal error: {str(e)}"}
+
+def convert_ai_to_d3p_format(ai_data: dict, report_type: str, conditioned_sf: float) -> pd.DataFrame:
+    """
+    Convert AI-extracted JSON data into the format expected by post_process.
+    """
+    rows = []
+    
+    # Standardize field mapping - extraction from nested { "value": X } structure
+    def get_val(key):
+        val = ai_data.get(key)
+        if isinstance(val, dict) and "value" in val:
+            return val["value"]
+        return val
+
+    # We assume AI data keys already match eeu_names from field_list.csv
+    # If not, a mapping layer would be needed here.
+    
+    for key, value in ai_data.items():
+        # Only process fields that look like energy components or are specific metadata
+        # Exclude totals as post_process recalculates them
+        # Exclude known metadata fields and totals
+        metadata_fields = ["weather_string", "area_units", "energy_units", "file_url", "file_name", "baseline_design", "user_id", "company_id", "project_name"]
+        if "_" in key and not key.startswith("total_") and key not in metadata_fields:
+            clean_val = get_val(key)
+            if clean_val is not None:
+                try:
+                    rows.append({
+                        "report": report_type,
+                        "report_field": key, # Bridges to eeu_name in post_process
+                        "energy_value": float(clean_val),
+                        "energy_units": get_val("energy_units") or "mbtu",
+                        "conditioned_area_sf": conditioned_sf,
+                        "weather_string": str(get_val("weather_string") or ""),
+                        "project_name": str(get_val("project_name") or "")
+                    })
+                except (ValueError, TypeError):
+                    logging_start.logger.warning(f"Could not convert {key} value '{clean_val}' to float, skipping.")
+                    continue
+    
+    if not rows:
+        # Fallback for minimal data (just the total)
+        rows.append({
+            "report": report_type,
+            "report_field": "total_energy",
+            "energy_value": float(get_val("total_energy") or 0),
+            "energy_units": get_val("energy_units") or "mbtu",
+            "conditioned_area_sf": conditioned_sf
+        })
+
+    return pd.DataFrame(rows)
+
+@router.post("/save_ai_parsed_data/")
+async def save_ai_parsed_data(item: models.SaveAIParsedData, authorized: Dict[str, Union[bool, Optional[str]]] = Depends(verify_token)):
+    """
+    Save AI-extracted data into eeu_data table, passing it through post_process for alignment.
+    """
+    if not authorized["is_authorized"]:
+        return {"status": "error", "message": "not authorized"}
+    
+    try:
+        user_id = authorized.get("user_id")
+        company_id = authorized.get("company_id")
+        
+        # 1. Align data with D3P format using post_process
+        all_data = item.model_dump()
+        report_type = "AI_Generated" # Special tag or use a real one
+        
+        df_long = convert_ai_to_d3p_format(all_data, report_type, item.use_type_total_area)
+        
+        from post_processing import post_process
+        df_processed = post_process(df_long)
+        
+        # 2. Convert processed DataFrame back to record for eeu_data
+        # Standard reports return multiple rows, but post_process now ensures 
+        # only the numeric data row is returned in the wide format.
+        processed_record = df_processed.iloc[0].to_dict()
+            
+        # Clean up metadata and ensure record is Supabase-friendly
+        processed_record.update({
+            "file_url": item.file_url,
+            "file_name": item.file_name,
+            "baseline_design": item.baseline_design,
+            "energy_units": item.energy_units or 'mbtu',
+            "user_id": user_id,
+            "company_id": company_id,
+            "is_ai_parsed": True
+        })
+        
+        # Clean up any NaN values or keys that are not valid column names (like '0.0')
+        final_record = {}
+        for k, v in processed_record.items():
+            if not isinstance(k, str) or k == "0.0":
+                continue # Skip numerical keys that leak from DataFrame transformation
+            
+            # Map NaN to None for Supabase
+            if pd.isna(v):
+                final_record[k] = None
+            else:
+                # Special handling: ensure energy end-uses are numbers, not strings like 'Cooling'
+                # This is a second line of defense against label leakage
+                # We exclude string-based metadata fields from this conversion
+                if "_" in k and not k.startswith("total_") and k not in ["weather_string", "file_url", "file_name", "is_ai_parsed", "baseline_design", "energy_units"]:
+                    try:
+                        final_record[k] = float(v)
+                    except (ValueError, TypeError):
+                        logging_start.logger.warning(f"Field {k} has non-numeric value '{v}', setting to None")
+                        final_record[k] = None
+                else:
+                    final_record[k] = v
+
+        # Fix area if it somehow became a string or None
+        if final_record.get('use_type_total_area') is None:
+            final_record['use_type_total_area'] = float(item.use_type_total_area or 0)
+        else:
+            final_record['use_type_total_area'] = float(final_record['use_type_total_area'])
+
+        logging_start.logger.info(f"Saving aligned AI data: {final_record['file_name']}")
+        
+        data, count = supabase.table("eeu_data")\
+            .insert(final_record)\
+            .execute()
+            
+        if data and len(data) > 1 and data[1]:
+            new_id = data[1][0]["id"]
+            logging_start.logger.info(f"Successfully saved Aligned AI data, eeu_id: {new_id}")
+            return {
+                "status": "success",
+                "eeu_id": new_id,
+                "message": "Data saved successfully"
+            }
+        else:
+            return {"status": "error", "message": "Failed to insert data into eeu_data"}
+            
+    except Exception as e:
+        logging_start.logger.error(f"Error saving AI parsed data: {str(e)}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+

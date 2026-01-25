@@ -125,6 +125,10 @@ def post_process(df_output):
   
   df_cm_output = pd.merge(df_output,df_cm,on="report_field",how='outer')
   
+  # Special handling for AI_Generated reports - use report_field as eeu_name if mapping is absent
+  if report_type == "AI_Generated":
+      df_cm_output['eeu_name'] = df_cm_output['eeu_name'].fillna(df_cm_output['report_field'])
+
   # Validate merge produced results
   if df_cm_output.empty or len(df_cm_output) == 0:
     raise ValueError(f"Merge with column mapping failed - no matching report_field values found. Report type: {report_type}")
@@ -216,24 +220,22 @@ def post_process(df_output):
 
     df_new = df_fields_list.T
     
-    # Validate dataframe has enough rows before accessing indices
-    if len(df_new) < 4:
-      raise ValueError(f"Transformed dataframe has insufficient rows ({len(df_new)}), expected at least 4")
+    # Robustly identify rows by label instead of index
+    # Original columns become index: ['field', 'fuel_source', 'higher_level_grouping', 'total_val', 'units', ...]
+    try:
+        new_header = df_new.loc['field'] 
+        # Pick specifically the row containing the calculated values
+        df_values = df_new.loc[['total_val']] 
+    except KeyError as e:
+        logging_start.logger.error(f"Post-process error: Could not find required row labels in transposed data: {e}")
+        # Fallback to index-based if labels are somehow missing
+        new_header = df_new.iloc[0]
+        df_values = df_new.iloc[[3]] if len(df_new) > 3 else df_new.iloc[[1]]
+
+    df_new = df_values
+    df_new.columns = new_header
+    df_new.reset_index(drop=True, inplace=True)
     
-    if df_new.shape[1] == 0:
-      raise ValueError("Transformed dataframe has no columns")
-    
-    df_new['energy_units']=df_new.iloc[3,0]
-    df_new.drop(labels=['fuel_source','units'],axis=0,inplace=True)
-    df_new.reset_index(inplace=True,drop=True)
-    
-    # Validate we still have data after dropping rows
-    if len(df_new) == 0:
-      raise ValueError("Dataframe is empty after dropping fuel_source and units rows")
-    
-    new_header = df_new.iloc[0] #grab the first row for the header
-    df_new = df_new[1:] #take the data less the header row
-    df_new.columns = new_header #set the header row as the df header
     df_new["area_units"]='sf'
     df_new["weather_station"]=weather_info['city_name']
     df_new["climate_zone"]=weather_info['climate_zone']

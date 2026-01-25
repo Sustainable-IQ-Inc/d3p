@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { Formik, Field, Form, FieldArray } from "formik";
+import axios from "axios";
+import { createClient } from "utils/supabase";
 import ProjectCard from "./ProjectDetailCard";
 import ProjectCardHorizontal from "./ProjectDetailCardHorizontal";
-import { Button, Typography, IconButton } from "@mui/material";
+import { Button, Typography, IconButton, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Grid } from "@mui/material";
 import Popover from "@mui/material/Popover";
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 
 import ListProjects from "components/projects/ListProjects";
 import { getProjectList } from "components/projects/project";
@@ -88,7 +91,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
     console.log("Submitting row data:", rowData);
     console.log("Year value:", rowData.year);
     console.log("Reporting year value:", rowData.reporting_year);
-    
+
     const submitData: SubmitUploadProps = {
       project_use_type_id: rowData.project_use_type_id,
       project_phase_id: rowData.project_phase_id,
@@ -99,7 +102,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
       energy_code_id: rowData.energy_code_id,
       baseline_eeu_id:
         rowData.baseline_file_data &&
-        rowData.baseline_file_data.id !== undefined
+          rowData.baseline_file_data.id !== undefined
           ? rowData.baseline_file_data.id
           : null,
       design_eeu_id: rowData.id !== undefined ? rowData.id : null,
@@ -172,12 +175,202 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
 
   const [errorIndex] = useState<number | null>(null);
   const [activeStep] = useState(1);
-  
+
   const [initialValues, setInitialValues] = useState<{ records: RecordData[] }>(
     {
       records: [],
     }
   ); // Provide a type for the initialValues state variable
+
+  // Dynamic Parsing State
+  const [dynamicProcessing, setDynamicProcessing] = useState<boolean>(false);
+  const [reviewData, setReviewData] = useState<any>(null);
+  const [reviewIndex, setReviewIndex] = useState<number | null>(null);
+  const [reviewType, setReviewType] = useState<'design' | 'baseline'>('design');
+  const [showReviewDialog, setShowReviewDialog] = useState<boolean>(false);
+
+  const handleTriggerDynamicParsing = async (
+    fileUrl: string,
+    fileName: string,
+    index: number,
+    type: 'design' | 'baseline',
+    setFieldValue: Function,
+    values: any
+  ) => {
+    console.log("Button Clicked!", { fileUrl, fileName, index, type });
+    if (!fileUrl) {
+      console.error("Missing fileUrl");
+      return;
+    }
+
+    setDynamicProcessing(true);
+    setReviewIndex(index);
+    setReviewType(type);
+
+    try {
+      const supabase = createClient();
+      const { data: session } = await supabase.auth.getSession();
+
+      const response = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_BASE_URL}/trigger_dynamic_parsing/`,
+        {
+          file_url: fileUrl,
+          file_name: fileName,
+          baseline_design: type
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.session?.access_token}`,
+          },
+        }
+      );
+
+      if (response.data.status === "success") {
+        const result = response.data.data;
+        let datasetToUse = null;
+
+        // Handle new response structure with formatted_datasets
+        if (result.formatted_datasets && Array.isArray(result.formatted_datasets)) {
+          // Find the matching dataset (design or baseline)
+          datasetToUse = result.formatted_datasets.find((ds: any) =>
+            ds.baseline_design_type && ds.baseline_design_type.toLowerCase() === type.toLowerCase()
+          );
+
+          // If match not found, fallback to the first one (or 'unknown' if applicable)
+          if (!datasetToUse && result.formatted_datasets.length > 0) {
+            datasetToUse = result.formatted_datasets[0];
+          }
+        }
+        // Fallback to legacy single-dataset structure if formatted_datasets is missing
+        else if (result.formatted_data) {
+          datasetToUse = result;
+        }
+
+        if (datasetToUse) {
+          // Flatten the data for the UI (extract values from metadata objects)
+          const rawData = datasetToUse.formatted_data || datasetToUse;
+          const flattenedData: any = {};
+
+          Object.keys(rawData).forEach(key => {
+            const val = rawData[key];
+            if (val && typeof val === 'object' && val.hasOwnProperty('value')) {
+              flattenedData[key] = val.value;
+            } else {
+              flattenedData[key] = val;
+            }
+          });
+
+          const finalExtractedData = {
+            ...flattenedData,
+            _raw_data: rawData
+          };
+
+          console.log("AI data extracted successfully, applying automatically...");
+          await saveAndApplyAIParsedData(finalExtractedData, index, type, values.records[index], setFieldValue);
+        } else {
+          message.warning("No data found for this file type in the extraction result.");
+        }
+      } else {
+        message.error(`Dynamic parsing failed: ${response.data.message}`);
+      }
+    } catch (error: any) {
+      console.error("Error triggering dynamic parsing:", error);
+      message.error("Failed to trigger dynamic parsing");
+    } finally {
+      setDynamicProcessing(false);
+    }
+  };
+
+  const saveAndApplyAIParsedData = async (
+    extractedData: any,
+    index: number,
+    type: 'design' | 'baseline',
+    record: any,
+    setFieldValue: Function
+  ) => {
+    const prefix = type === 'design' ? `records.${index}` : `records.${index}.baseline_file_data`;
+
+    try {
+      const supabase = createClient();
+      const { data: session } = await supabase.auth.getSession();
+
+      const payload = {
+        ...extractedData,
+        file_url: type === 'design' ? record.file_url : record.baseline_file_data?.file_url,
+        file_name: extractedData.file_name || (type === 'design' ? record.file_name : record.baseline_file_data?.file_name),
+        baseline_design: type,
+        total_energy: Number(extractedData.total_energy),
+        use_type_total_area: Number(extractedData.use_type_total_area || record.use_type_total_area),
+        climate_zone: String(extractedData.climate_zone || ''),
+        energy_units: extractedData.energy_units || 'mbtu',
+        user_id: user.id || null,
+        company_id: user.companyId || null
+      };
+
+      // Clean up internal keys before sending
+      delete (payload as any)._raw_data;
+      delete (payload as any).total_Electricity;
+      delete (payload as any).total_NaturalGas;
+      delete (payload as any).total_DistrictHeating;
+      delete (payload as any).total_Other;
+      delete (payload as any).total_On_SiteRenewables;
+
+      if (isNaN(payload.total_energy) || isNaN(payload.use_type_total_area)) {
+        console.warn("Invalid data returned from AI, dropping to review modal", payload);
+        setReviewData(extractedData);
+        setReviewIndex(index);
+        setReviewType(type);
+        setShowReviewDialog(true);
+        return;
+      }
+
+      const saveResponse = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_BASE_URL}/save_ai_parsed_data/`,
+        payload,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.session?.access_token}`,
+          },
+        }
+      );
+
+      if (saveResponse.data.status === "success") {
+        const newEeuId = saveResponse.data.eeu_id;
+        setFieldValue(`${prefix}.id`, newEeuId);
+        setFieldValue(`${prefix}.use_type_total_area`, extractedData.use_type_total_area);
+        setFieldValue(`${prefix}.total_energy`, extractedData.total_energy);
+        setFieldValue(`${prefix}.climate_zone`, extractedData.climate_zone);
+        setFieldValue(`${prefix}.is_ai_parsed`, true);
+
+        if (type === 'design') {
+          setFieldValue(`records.${index}.upload_attempted`, false);
+        } else {
+          setFieldValue(`records.${index}.baseline_file_data.upload_attempted`, false);
+        }
+
+        message.success("AI parsed data applied automatically!");
+      } else {
+        throw new Error(saveResponse.data.message);
+      }
+    } catch (error) {
+      console.error("Error auto-applying AI data, falling back to modal:", error);
+      setReviewData(extractedData);
+      setReviewIndex(index);
+      setReviewType(type);
+      setShowReviewDialog(true);
+    }
+  };
+
+  const handleApplyDynamicData = async (setFieldValue: Function, values: any) => {
+    if (reviewIndex === null || !reviewData) return;
+    const record = values.records[reviewIndex];
+    await saveAndApplyAIParsedData(reviewData, reviewIndex, reviewType, record, setFieldValue);
+    setShowReviewDialog(false);
+    setReviewData(null);
+  };
+
 
   useEffect(() => {
     if (data) {
@@ -198,7 +391,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
         has_subtypes: upload.has_subtypes || false,
         project_id: upload.project_id || "00000000-0000-0000-0000-000000000000",
       }));
-      
+
       // Add failed uploads as records with upload_attempted = true but no id
       const failedUploadRecords = (data.failed_uploads || []).map((failedUpload: any) => ({
         id: undefined,
@@ -227,9 +420,9 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
 
       const updatedBaselineFiles = Array.isArray(data.unmatched_baseline_files)
         ? data.unmatched_baseline_files.map((file: any) => ({
-            ...file,
-            visible: true,
-          }))
+          ...file,
+          visible: true,
+        }))
         : [];
       setBaselineFiles([...updatedBaselineFiles]);
       setInitialValues({ records: allRecords });
@@ -276,7 +469,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
     return projectList;
   };
 
-  
+
   const handleFileClick = (
     index_sub: number,
     file: FileData,
@@ -291,8 +484,8 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
       )
     );
     handleClose();
-    
-    
+
+
   };
 
   const handleOnChange = (
@@ -321,12 +514,12 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
         initialValues={initialValues}
         enableReinitialize
         onSubmit={(values, { setSubmitting, resetForm }) => {
-          
+
           setSubmitting(false);
           resetForm();
         }}
       >
-        {({ values, handleSubmit, isSubmitting }) => (
+        {({ values, handleSubmit, isSubmitting, setFieldValue }) => (
           <Form>
             <table className="table">
               <thead>
@@ -401,12 +594,13 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                               use_type_total_area={record.use_type_total_area}
                               climate_zone={record.climate_zone}
                               file_name={record.file_name}
+                              is_ai_parsed={(record as any).is_ai_parsed}
                             />
                           ) : values.records[index].upload_attempted && values.records[index].file_name ? (
-                            <div style={{ 
-                              padding: "16px", 
-                              border: "1px solid #ff9800", 
-                              borderRadius: "4px", 
+                            <div style={{
+                              padding: "16px",
+                              border: "1px solid #ff9800",
+                              borderRadius: "4px",
                               backgroundColor: "#fff3e0",
                               marginTop: "8px"
                             }}>
@@ -421,10 +615,36 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                               <Typography variant="caption" style={{ color: "#bf360c", marginTop: "4px", display: "block" }}>
                                 File uploaded but not processed Automatically. You can still complete the form and we will update you once it is processed.
                               </Typography>
+
+                              {dynamicProcessing && reviewIndex === index && reviewType === 'design' ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
+                                  <CircularProgress size={20} />
+                                  <Typography variant="caption">AI Parsing in progress (~1 min)...</Typography>
+                                </div>
+                              ) : (values.records[index] as any).can_dynamic_parse ? (
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  startIcon={<AutoFixHighIcon />}
+                                  style={{ marginTop: "8px", borderColor: "#ff9800", color: "#e65100" }}
+                                  onClick={() => handleTriggerDynamicParsing(
+                                    (values.records[index] as any).file_url,
+                                    values.records[index].file_name,
+                                    index,
+                                    'design',
+                                    setFieldValue,
+                                    values
+                                  )}
+                                >
+                                  Use AI Parser?
+                                </Button>
+                              ) : null}
                             </div>
                           ) : (
+
                             <FileDropzone
                               onUploadStatusChange={(status, response) => {
+                                console.log("Upload Status Change:", status, response);
                                 if (status === "done" || status === "warning") {
                                   // Check if this is a failed upload that allows form completion
                                   if (status === "warning" && response && response.status === 'error' && response.allow_form_completion) {
@@ -446,9 +666,24 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                         response.url
                                       );
                                     }
+
+                                    // Capture dynamic parsing eligibility
+                                    if (response.can_dynamic_parse) {
+                                      setFieldValue(`records.${index}.can_dynamic_parse`, true);
+                                      setFieldValue(`records.${index}.file_url`, response.file_url);
+                                    }
+
                                     return;
                                   }
-                                  
+
+
+                                  // Capture dynamic parsing eligibility
+                                  if (response.can_dynamic_parse) {
+                                    setFieldValue(`records.${index}.can_dynamic_parse`, true);
+                                    setFieldValue(`records.${index}.file_url`, response.file_url); // Ensure we have the URL
+                                  }
+
+
                                   // Check if this is a PRM report (report_type 8)
                                   if (response.report_type === 8) {
                                     // For PRM reports, we get both baseline and design data
@@ -481,7 +716,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                         response.url
                                       );
                                     }
-                                    
+
                                     // Set baseline data automatically
                                     const baselineData = response.baseline;
                                     setFieldValue(
@@ -622,7 +857,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                       if (selectedRecordIndex === null) {
                                         return;
                                       }
-                                      
+
                                       if (status === "done" || status === "warning") {
                                         // Check if this is a failed upload that allows form completion
                                         if (status === "warning" && response && response.status === 'error' && response.allow_form_completion) {
@@ -640,7 +875,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                           handleClose();
                                           return;
                                         }
-                                        
+
                                         // Check if this is a PRM report (report_type 8)
                                         if (response.report_type === 8) {
                                           // For PRM reports, use baseline data for baseline field
@@ -686,8 +921,8 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                             <div>
                               <b>Baseline File</b>
 
-                              {values.records[index].baseline_file_data && 
-                               values.records[index].baseline_file_data?.id ? (
+                              {values.records[index].baseline_file_data &&
+                                values.records[index].baseline_file_data?.id ? (
                                 <ProjectCard
                                   total_energy={
                                     values.records[index]?.baseline_file_data
@@ -705,6 +940,7 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                     values.records[index].baseline_file_data
                                       ?.file_name
                                   }
+                                  is_ai_parsed={(values.records[index].baseline_file_data as any)?.is_ai_parsed}
                                   showCloseIcon={true}
                                   onClose={() => {
                                     setFieldValue(
@@ -715,8 +951,8 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                     setBaselineFiles((prevFiles) =>
                                       prevFiles.map((file) =>
                                         file.file_name ===
-                                        values.records[index].baseline_file_data
-                                          ?.file_name
+                                          values.records[index].baseline_file_data
+                                            ?.file_name
                                           ? { ...file, visible: true }
                                           : file
                                       )
@@ -724,12 +960,12 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                     handleClose();
                                   }}
                                 />
-                              ) : values.records[index].baseline_file_data?.upload_attempted && 
-                                 values.records[index].baseline_file_data?.file_name ? (
-                                <div style={{ 
-                                  padding: "16px", 
-                                  border: "1px solid #ff9800", 
-                                  borderRadius: "4px", 
+                              ) : values.records[index].baseline_file_data?.upload_attempted &&
+                                values.records[index].baseline_file_data?.file_name ? (
+                                <div style={{
+                                  padding: "16px",
+                                  border: "1px solid #ff9800",
+                                  borderRadius: "4px",
                                   backgroundColor: "#fff3e0",
                                   marginTop: "8px"
                                 }}>
@@ -744,8 +980,38 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                   <Typography variant="caption" style={{ color: "#bf360c", marginTop: "4px", display: "block" }}>
                                     File uploaded but not processed. You can still complete the form.
                                   </Typography>
+
+                                  {dynamicProcessing && reviewIndex === index && reviewType === 'baseline' ? (
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
+                                      <CircularProgress size={20} />
+                                      <Typography variant="caption">AI Parsing in progress (~1 min)...</Typography>
+                                    </div>
+                                  ) : (values.records[index].baseline_file_data as any)?.can_dynamic_parse ? (
+                                    <Button
+                                      variant="outlined"
+                                      size="small"
+                                      startIcon={<AutoFixHighIcon />}
+                                      style={{ marginTop: "8px", borderColor: "#ff9800", color: "#e65100" }}
+                                      onClick={() => {
+                                        const baselineData = values.records[index].baseline_file_data;
+                                        if (baselineData && (baselineData as any).file_url) {
+                                          handleTriggerDynamicParsing(
+                                            (baselineData as any).file_url,
+                                            baselineData.file_name,
+                                            index,
+                                            'baseline',
+                                            setFieldValue,
+                                            values
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      Use AI Parser?
+                                    </Button>
+                                  ) : null}
                                 </div>
                               ) : null}
+
                             </div>
                           )}
                         </td>
@@ -786,30 +1052,30 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                                 {(values.records[index].has_subtypes ||
                                   values.records[index]
                                     .use_type_subtype_id) && (
-                                  <Field
-                                    component={EnumList}
-                                    name="use_type_subtype_id"
-                                    params={{
-                                      enum_name: "use_type_subtypes",
-                                      label: "Use Type Subtype",
-                                      required: false,
-                                      populateValue:
-                                        values.records[index]
-                                          .use_type_subtype_id || undefined,
-                                      additional_filter_fields: {
-                                        use_type_id:
+                                    <Field
+                                      component={EnumList}
+                                      name="use_type_subtype_id"
+                                      params={{
+                                        enum_name: "use_type_subtypes",
+                                        label: "Use Type Subtype",
+                                        required: false,
+                                        populateValue:
                                           values.records[index]
-                                            .project_use_type_id,
-                                      },
-                                    }}
-                                    onChange={(value: number) =>
-                                      setFieldValue(
-                                        `records.${index}.use_type_subtype_id`,
-                                        value
-                                      )
-                                    }
-                                  />
-                                )}
+                                            .use_type_subtype_id || undefined,
+                                        additional_filter_fields: {
+                                          use_type_id:
+                                            values.records[index]
+                                              .project_use_type_id,
+                                        },
+                                      }}
+                                      onChange={(value: number) =>
+                                        setFieldValue(
+                                          `records.${index}.use_type_subtype_id`,
+                                          value
+                                        )
+                                      }
+                                    />
+                                  )}
 
                                 <div className="max-width-250">
                                   <YearField
@@ -1012,6 +1278,71 @@ const MultiUploadDetails: React.FC<MultiUploadDetailsProps> = ({ data }) => {
                 )}
               </FieldArray>
             </table>
+            <Dialog open={showReviewDialog} onClose={() => setShowReviewDialog(false)} maxWidth="md" fullWidth>
+              <DialogTitle>Review AI Extracted Data</DialogTitle>
+              <DialogContent>
+                <Typography variant="body2" gutterBottom>
+                  Please review and edit the values extracted by the AI parser. These values will be applied to your project.
+                </Typography>
+
+                {reviewData && (
+                  <Grid container spacing={2} style={{ marginTop: "10px" }}>
+                    <Grid item xs={12}>
+                      <Typography variant="h6">Project Specs</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <TextField
+                        label="Conditioned Area (sq ft)"
+                        type="number"
+                        fullWidth
+                        value={reviewData.use_type_total_area || ''}
+                        onChange={(e) => setReviewData({ ...reviewData, use_type_total_area: parseFloat(e.target.value) })}
+                      />
+                    </Grid>
+                    <Grid item xs={6}>
+                      <TextField
+                        label="Climate Zone"
+                        fullWidth
+                        value={reviewData.climate_zone || ''}
+                        onChange={(e) => setReviewData({ ...reviewData, climate_zone: e.target.value })}
+                      />
+                    </Grid>
+
+                    <Grid item xs={12}>
+                      <Typography variant="h6" style={{ marginTop: "10px" }}>Energy End-Uses ({reviewData.energy_units || 'mbtu'})</Typography>
+                    </Grid>
+
+                    {Object.keys(reviewData)
+                      .filter(key => key.includes('_') && !key.startsWith('total_') && !['_raw_data', 'project_name'].includes(key))
+                      .map(key => (
+                        <Grid item xs={6} key={key}>
+                          <TextField
+                            label={key.replace('_', ' ')}
+                            type="number"
+                            fullWidth
+                            size="small"
+                            value={reviewData[key] ?? 0}
+                            onChange={(e) => setReviewData({ ...reviewData, [key]: parseFloat(e.target.value) || 0 })}
+                          />
+                        </Grid>
+                      ))}
+
+                    <Grid item xs={12}>
+                      <Typography variant="h6" style={{ marginTop: "10px", color: '#1976d2' }}>Total Energy: {reviewData.total_energy || '0'} {reviewData.energy_units || 'mbtu'}</Typography>
+                    </Grid>
+                  </Grid>
+                )}
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setShowReviewDialog(false)}>Cancel</Button>
+                <Button
+                  onClick={() => handleApplyDynamicData(setFieldValue, values)}
+                  variant="contained" color="primary"
+                >
+                  Apply Values
+                </Button>
+              </DialogActions>
+            </Dialog>
           </Form>
         )}
       </Formik>

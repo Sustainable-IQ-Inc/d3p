@@ -31,12 +31,12 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
   data,
   detailPageView,
 }) => {
-  
+
   const [operationalEnergyData, setOperationalEnergyData] =
     useState<OperationalEnergyDataCombinedProps>();
   const [operationalCarbonData, setOperationalCarbonData] =
     useState<OperationalCarbonDataCombinedProps>();
-    const [emissionsFactors, setEmissionsFactors] =
+  const [emissionsFactors, setEmissionsFactors] =
     useState<EmissionsFactorsProps>();
   const [selectedEnergyOption, setSelectedEnergyOption] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
@@ -49,10 +49,11 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
   } | null>(null);
 
   const fetchOperationalData = () => {
+    if (!data?.project_id) return;
     // Fetch data from your API
     getProjectOperationalData(data.project_id)
       .then((operational_data: OperationalDataProps) => {
-        
+
         // Transform data to the required format for react-select
         setOperationalEnergyData(operational_data.operational_energy_data);
         setOperationalCarbonData(operational_data.operational_carbon_data);
@@ -68,6 +69,7 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
   };
 
   const fetchDDXStatus = async () => {
+    if (!data?.project_id) return;
     try {
       const response = await getDDXIntegrationStatus(data.project_id);
       if (response.status === 'success') {
@@ -97,7 +99,7 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
     if (!isShareModalOpen) {
       // Fetch DDX preview data when opening the modal
       try {
-        const previewData = await FetchDDXPreviewData(data.project_id);
+        const previewData = await FetchDDXPreviewData(data?.project_id);
         setDdxPreviewData(previewData);
       } catch (error) {
         console.error('Error fetching DDX preview data:', error);
@@ -139,7 +141,7 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
   useEffect(() => {
     fetchOperationalData();
     fetchDDXStatus();
- 
+
   }, [data]);
   // Remove the local handleDataRefresh function
   // const handleDataRefresh = () => {
@@ -164,10 +166,10 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
   const handleFieldChange = (field: string, value: string) => {
     if (field === 'use_type_total_area') {
       // When GSF is updated, also update the conditioned_area field
-      setEditableData({ 
-        ...editableData, 
+      setEditableData({
+        ...editableData,
         [field]: value,
-        conditioned_area: value 
+        conditioned_area: value
       });
     } else {
       setEditableData({ ...editableData, [field]: value });
@@ -182,10 +184,10 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
         open={isShareModalOpen}
         onClose={toggleShareModal}
         ddxPreviewData={ddxPreviewData}
-        projectId={data.project_id}
+        projectId={data?.project_id}
         onSuccess={handleDDXSuccess}
       />
-      
+
       <Grid container spacing={3}>
         <Grid item xs={3}>
           {!isEditing && (
@@ -198,7 +200,7 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
               handleEnumChange={(field, value) => {
                 setEditableData({ ...editableData, [field]: value });
               }}
-              handleClose={handleClose} 
+              handleClose={handleClose}
             />
           )}
         </Grid>
@@ -215,7 +217,7 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
               handleEnumChange={(field, value) => {
                 setEditableData({ ...editableData, [field]: value });
               }}
-              handleClose={handleClose} 
+              handleClose={handleClose}
             />
           </DialogContent>
         </Dialog>
@@ -227,9 +229,9 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
             )}
           </Box>
           {operationalCarbonData && emissionsFactors && operationalEnergyData ? (
-            <OperationalCarbonTable carbonData={operationalCarbonData} 
-            energyData={operationalEnergyData} 
-            emissionsFactors={emissionsFactors} />
+            <OperationalCarbonTable carbonData={operationalCarbonData}
+              energyData={operationalEnergyData}
+              emissionsFactors={emissionsFactors} />
           ) : (
             <MainCard>
               <CardContent>
@@ -239,7 +241,7 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
           )}
         </Grid>
         <Grid item xs={4}>
-          <MainCard 
+          <MainCard
             title={
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                 <Typography variant="h6" fontWeight="bold">Energy End Uses</Typography>
@@ -268,8 +270,8 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
           >
             <CardContent>
               {operationalEnergyData ? (
-                <EnergyUseChart 
-                  projectId={data.project_id} 
+                <EnergyUseChart
+                  projectId={data?.project_id}
                   baseline_design={validSelectedOption}
                 />
               ) : (
@@ -281,7 +283,7 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
         {!detailPageView && (
           <Grid item xs={12}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Link href={`/projects/${data.project_id}`}>
+              <Link href={`/projects/${data?.project_id}`}>
                 <Button variant="contained" color="primary">
                   Go to Project
                 </Button>
@@ -291,10 +293,10 @@ const ProjectDetailSection: React.FC<ProjectDetailSectionProps> = ({
                 operationalEnergyData={operationalEnergyData}
               />
               <ExportProjectsButton
-                projectId={data.project_id}
+                projectId={data?.project_id}
                 measurementSystem="Imperial"
               />
-              
+
               <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>
                 {ddxStatus?.has_been_shared ? (
                   <>
