@@ -73,6 +73,7 @@ jobs:
       api_base_url: ${{ steps.setup.outputs.api_base_url }}
       redirect_url: ${{ steps.setup.outputs.redirect_url }}
       streamlit_url: ${{ steps.setup.outputs.streamlit_url }}
+      dynamic_parser_url: ${{ steps.setup.outputs.dynamic_parser_url }}
       allowed_origins: ${{ steps.setup.outputs.allowed_origins }}
     steps:
       - uses: actions/checkout@v3
