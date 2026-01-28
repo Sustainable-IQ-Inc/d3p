@@ -197,6 +197,14 @@ jobs:
           create_or_update_secret "${ENVIRONMENT^^}_ENCRYPTION_SALT" "${{ secrets.ENCRYPTION_SALT }}"
           create_or_update_secret "${ENVIRONMENT^^}_BUCKET_NAME" "${{ secrets.BUCKET_NAME }}"
           
+          # Dynamic Parsing Secrets
+          if [ -n "${{ secrets.DYNAMIC_PARSING_ENABLED }}" ]; then
+            create_or_update_secret "${ENVIRONMENT^^}_DYNAMIC_PARSING_ENABLED" "${{ secrets.DYNAMIC_PARSING_ENABLED }}"
+          fi
+          if [ -n "${{ secrets.DYNAMIC_PARSER_URL }}" ]; then
+            create_or_update_secret "${ENVIRONMENT^^}_DYNAMIC_PARSER_URL" "${{ secrets.DYNAMIC_PARSER_URL }}"
+          fi
+          
           # GitHub secret is already base64 encoded to preserve JSON formatting
           echo "🔍 Debug: SIGNING_SA_CREDENTIALS from GitHub (base64 encoded):"
           echo "📏 Base64 length from GitHub: $(printf '%s' "${{ secrets.SIGNING_SA_CREDENTIALS }}" | wc -c)"
@@ -380,7 +388,7 @@ jobs:
           fi
           
           # Add dynamic parsing secrets if they exist
-          if [ -n "${{ secrets.DYNAMIC_PARSING_ENABLED }}" ]; then
+          if gcloud secrets describe "${ENVIRONMENT^^}_DYNAMIC_PARSING_ENABLED" --project=$PROJECT_ID &>/dev/null; then
             SECRET_REFS="$SECRET_REFS,DYNAMIC_PARSING_ENABLED=${ENVIRONMENT^^}_DYNAMIC_PARSING_ENABLED:latest"
           fi
           
