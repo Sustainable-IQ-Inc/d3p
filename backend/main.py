@@ -366,8 +366,9 @@ async def get_projects(company_id: Optional[str] = None,
                 query = query.eq('project_id', project_id)
             
             data, count = query.execute()
-            
-            if data[1] != []:
+            print(f"DEBUG: Projects query executed. Count: {len(data[1]) if data and data[1] else 0}")
+            if data[1]:
+                print(f"DEBUG: Sample project: {data[1][0].get('project_name')}")
                 if measurement_system == 'Imperial':
                     data_output = data[1]
                     #data_output = add_operational_carbon_calcs(data_output)
@@ -1137,5 +1138,4 @@ if __name__ == "__main__":
         reload=True,
         reload_dirs=["backend"]
     )
-
 

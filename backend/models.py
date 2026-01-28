@@ -33,6 +33,7 @@ class SubmitProject(BaseModel):
     file_url: Optional[str] = None
     file_name: Optional[str] = None
 
+
 class CreateCompany(BaseModel):
     company_name: str
 
@@ -126,6 +127,18 @@ class ZipUpdate(BaseModel):
 class FlexibleModel(BaseModel):
     class Config:
         extra = 'allow'  # Allow extra fields not explicitly defined
+
+
+class SaveAIParsedData(FlexibleModel):
+    file_url: str
+    file_name: str
+    baseline_design: str
+    total_energy: Optional[float] = None
+    use_type_total_area: Optional[float] = None
+    climate_zone: Optional[str] = None
+    energy_units: Optional[str] = 'mbtu'
+    user_id: Optional[str] = None
+    company_id: Optional[str] = None
 
 
 class MultiProjectExcelUpload(BaseModel):

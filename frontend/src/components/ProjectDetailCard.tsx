@@ -1,8 +1,9 @@
 import React from "react";
 import { Box, Typography, Grid, Paper, IconButton } from "@mui/material";
 import { styled } from "@mui/system";
-import { FaPlug, FaFilePdf, FaCloud, FaBuilding } from "react-icons/fa";
+import { FaPlug, FaFilePdf, FaCloud, FaBuilding, FaRobot } from "react-icons/fa";
 import CloseIcon from "@mui/icons-material/Close";
+import { Chip } from "@mui/material";
 
 const Container = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(2),
@@ -29,6 +30,7 @@ const DocumentCard = ({
   climate_zone,
   file_name,
   showCloseIcon = false,
+  is_ai_parsed = false,
   onClose,
 }: {
   total_energy: number | undefined;
@@ -36,6 +38,7 @@ const DocumentCard = ({
   climate_zone: string | undefined;
   file_name: string | undefined;
   showCloseIcon?: boolean;
+  is_ai_parsed?: boolean;
   onClose?: () => void;
 }) => {
   const energyPerArea =
@@ -44,23 +47,23 @@ const DocumentCard = ({
       : 0;
   const formattedEnergyPerArea = energyPerArea
     ? energyPerArea.toLocaleString(undefined, {
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1,
-      })
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    })
     : "";
 
   const formattedUseTypeTotalArea = use_type_total_area
     ? use_type_total_area.toLocaleString(undefined, {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-      })
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    })
     : "";
 
   const formattedTotalEnergy = total_energy
     ? total_energy.toLocaleString(undefined, {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-      })
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    })
     : "";
 
   return (
@@ -85,6 +88,16 @@ const DocumentCard = ({
           <Typography variant="h5" style={{ fontWeight: "bold" }}>
             {file_name}
           </Typography>
+          {is_ai_parsed && (
+            <Chip
+              icon={<FaRobot />}
+              label="AI Parsed"
+              size="small"
+              color="primary"
+              variant="outlined"
+              style={{ marginLeft: '10px' }}
+            />
+          )}
         </Grid>
         <Grid item xs={6} sm={6} component={Item}>
           <Icon>

@@ -286,7 +286,8 @@ def get_energy_end_uses_data(project_id, baseline_design, **kwargs):
     if energy_units == 'gj':
         df_eeu = convert_gj_to_mbtu(df_eeu,supabase,'eeu_data')
         
-    use_type_total_area = float(df_eeu['use_type_total_area'][0])
+    raw_area = df_eeu['use_type_total_area'][0] if 'use_type_total_area' in df_eeu.columns else 0
+    use_type_total_area = float(raw_area) if raw_area is not None else 0.0
     
     if output_units == 'kbtu/sf':
         df_eeu = convert_mbtu_to_kbtu_per_sf(df_eeu, use_type_total_area, supabase)

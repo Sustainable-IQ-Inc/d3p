@@ -58,7 +58,10 @@ on:
         required: false
       SENDGRID_FROM_EMAIL:
         required: false
-      ADMIN_EMAILS:
+      # Dynamic Parsing
+      DYNAMIC_PARSING_ENABLED:
+        required: false
+      DYNAMIC_PARSER_URL:
         required: false
 
 jobs:
@@ -125,19 +128,29 @@ jobs:
             echo "Generated REDIRECT_URL: $REDIRECT_URL"
           fi
           
+          DYNAMIC_PARSER_URL="https://${ENVIRONMENT}-extraction-service-${PROJECT_NUMBER}.${REGION}.run.app"
+          
+          # Use provided DYNAMIC_PARSER_URL override if present
+          if [ -n "${{ secrets.DYNAMIC_PARSER_URL }}" ]; then
+            DYNAMIC_PARSER_URL="${{ secrets.DYNAMIC_PARSER_URL }}"
+            echo "Using provided DYNAMIC_PARSER_URL override: $DYNAMIC_PARSER_URL"
+          fi
+          
           # Generate ALLOWED_ORIGINS
-          ALLOWED_ORIGINS="${REDIRECT_URL},http://localhost:3000,http://localhost:8081"
+          ALLOWED_ORIGINS="${REDIRECT_URL},${DYNAMIC_PARSER_URL},http://localhost:3000,http://localhost:8081"
           
           echo "Generated URLs:"
           echo "  API_BASE_URL: $API_BASE_URL"
           echo "  REDIRECT_URL: $REDIRECT_URL"
           echo "  STREAMLIT_URL: $STREAMLIT_URL"
+          echo "  DYNAMIC_PARSER_URL: $DYNAMIC_PARSER_URL"
           echo "  ALLOWED_ORIGINS: $ALLOWED_ORIGINS"
           
           # Output URLs for other jobs
           echo "api_base_url=$API_BASE_URL" >> $GITHUB_OUTPUT
           echo "redirect_url=$REDIRECT_URL" >> $GITHUB_OUTPUT
           echo "streamlit_url=$STREAMLIT_URL" >> $GITHUB_OUTPUT
+          echo "dynamic_parser_url=$DYNAMIC_PARSER_URL" >> $GITHUB_OUTPUT
           echo "allowed_origins=$ALLOWED_ORIGINS" >> $GITHUB_OUTPUT
           
           # Create secrets if they don't exist, update only if value changed
@@ -364,6 +377,14 @@ jobs:
             echo "⚠ Warning: ADMIN_EMAILS secret not found in Secret Manager - will not be included in deployment"
           fi
           
+          # Add dynamic parsing secrets if they exist
+          if [ -n "${{ secrets.DYNAMIC_PARSING_ENABLED }}" ]; then
+            SECRET_REFS="$SECRET_REFS,DYNAMIC_PARSING_ENABLED=${ENVIRONMENT^^}_DYNAMIC_PARSING_ENABLED:latest"
+          fi
+          
+          # Use generated parser URL
+          DYNAMIC_PARSER_URL="${{ needs.setup.outputs.dynamic_parser_url }}"
+          
           echo "📋 Deploying service with secrets: $SECRET_REFS"
           
           # Deploy - --update-secrets will replace all secret references, removing any not in the list
@@ -374,7 +395,7 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --update-secrets="$SECRET_REFS" \
-            --set-env-vars="ENV=$ENVIRONMENT"
+            --set-env-vars="ENV=$ENVIRONMENT,DYNAMIC_PARSER_URL=$DYNAMIC_PARSER_URL"
 
   deploy-frontend:
     needs: setup
