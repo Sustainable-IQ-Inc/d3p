@@ -202,6 +202,11 @@ case $choice in
             set_secret "STAGING_REDIRECT_URL" "$staging_redirect"
         fi
         
+        read -p "Enable staging dynamic parsing? (y/n): " enable_staging_parsing
+        if [ "$enable_staging_parsing" = "y" ]; then
+            set_secret "STAGING_DYNAMIC_PARSING_ENABLED" "true"
+        fi
+        
         echo ""
         print_info "=== Production Environment Secrets ==="
         echo ""
@@ -243,6 +248,11 @@ case $choice in
         if [ "$set_prod_redirect" = "y" ]; then
             prod_redirect=$(prompt_for_value "Production Redirect URL")
             set_secret "PROD_REDIRECT_URL" "$prod_redirect"
+        fi
+        
+        read -p "Enable production dynamic parsing? (y/n): " enable_prod_parsing
+        if [ "$enable_prod_parsing" = "y" ]; then
+            set_secret "PROD_DYNAMIC_PARSING_ENABLED" "true"
         fi
         
         echo ""
@@ -308,6 +318,11 @@ case $choice in
         staging_db_password=$(prompt_for_value "Staging Supabase DB Password")
         set_secret "STAGING_SUPABASE_DB_PASSWORD" "$staging_db_password"
         
+        read -p "Enable staging dynamic parsing? (y/n): " enable_staging_parsing
+        if [ "$enable_staging_parsing" = "y" ]; then
+            set_secret "STAGING_DYNAMIC_PARSING_ENABLED" "true"
+        fi
+        
         print_success "Staging secrets have been set!"
         ;;
         
@@ -341,6 +356,11 @@ case $choice in
         
         prod_db_password=$(prompt_for_value "Production Supabase DB Password")
         set_secret "PROD_SUPABASE_DB_PASSWORD" "$prod_db_password"
+        
+        read -p "Enable production dynamic parsing? (y/n): " enable_prod_parsing
+        if [ "$enable_prod_parsing" = "y" ]; then
+            set_secret "PROD_DYNAMIC_PARSING_ENABLED" "true"
+        fi
         
         print_success "Production secrets have been set!"
         ;;
@@ -392,6 +412,8 @@ case $choice in
         [ -n "$PROD_SUPABASE_DB_PASSWORD" ] && set_secret "PROD_SUPABASE_DB_PASSWORD" "$PROD_SUPABASE_DB_PASSWORD"
         [ -n "$PROD_DDX_API_BASE_URL" ] && set_secret "PROD_DDX_API_BASE_URL" "$PROD_DDX_API_BASE_URL"
         [ -n "$PROD_REDIRECT_URL" ] && set_secret "PROD_REDIRECT_URL" "$PROD_REDIRECT_URL"
+        [ -n "$PROD_DYNAMIC_PARSING_ENABLED" ] && set_secret "PROD_DYNAMIC_PARSING_ENABLED" "$PROD_DYNAMIC_PARSING_ENABLED"
+        [ -n "$STAGING_DYNAMIC_PARSING_ENABLED" ] && set_secret "STAGING_DYNAMIC_PARSING_ENABLED" "$STAGING_DYNAMIC_PARSING_ENABLED"
         
         print_success "Secrets from environment file have been set!"
         ;;

@@ -106,7 +106,8 @@ async def verify_token(req: Request):
                 'company_id': user_company_id, 
                 'role': user_role, 
                 'user_id': user_id,
-                'user_email': user_email}
+                'user_email': user_email,
+                'access_token': access_token}
     except:
         print ("error with authentication")
         return {'is_authorized': False}   

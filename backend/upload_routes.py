@@ -1195,6 +1195,7 @@ async def trigger_dynamic_parsing(item: dict, authorized: Dict[str, Union[bool, 
     file_name = item.get('file_name', 'upload.pdf')
     baseline_design = item.get('baseline_design', 'design')
     model = item.get('model', 'gemini-2.5-pro')
+    access_token = authorized.get('access_token')
     
     if not file_url:
         return {"status": "error", "message": "file_url is required"}
@@ -1215,9 +1216,13 @@ async def trigger_dynamic_parsing(item: dict, authorized: Dict[str, Union[bool, 
             "user_id": authorized.get('user_id')
         }
         
-        # Call the parser service with a timeout (e.g., 60 seconds)
+        # Call the parser service with a token
+        headers = {}
+        if access_token:
+            headers['Authorization'] = f"Bearer {access_token}"
+            
         # Note: In a real production env, this might be better as an async job
-        response = requests.post(extract_endpoint, json=payload, timeout=60)
+        response = requests.post(extract_endpoint, json=payload, headers=headers, timeout=60)
         
         if response.status_code != 200:
             logging_start.logger.error(f"Dynamic parser returned error: {response.status_code} - {response.text}")
