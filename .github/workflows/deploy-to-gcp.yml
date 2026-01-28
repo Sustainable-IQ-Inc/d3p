@@ -58,6 +58,8 @@ on:
         required: false
       SENDGRID_FROM_EMAIL:
         required: false
+      ADMIN_EMAILS:
+        required: false
       # Dynamic Parsing
       DYNAMIC_PARSING_ENABLED:
         required: false
