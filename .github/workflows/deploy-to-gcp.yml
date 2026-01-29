@@ -19,6 +19,10 @@ on:
         required: false
         type: boolean
         default: true
+      skip_db_reset:
+        required: false
+        type: boolean
+        default: false
     secrets:
       GCP_SA_KEY:
         required: true
@@ -507,6 +511,7 @@ jobs:
     uses: ./.github/workflows/deploy-database.yml
     with:
       environment: ${{ inputs.environment }}
+      skip_db_reset: ${{ inputs.skip_db_reset }}
     secrets:
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
       GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
