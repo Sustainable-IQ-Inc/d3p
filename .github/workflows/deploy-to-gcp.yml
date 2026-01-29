@@ -198,12 +198,12 @@ jobs:
           create_or_update_secret "${ENVIRONMENT^^}_ENCRYPTION_SALT" "${{ secrets.ENCRYPTION_SALT }}"
           create_or_update_secret "${ENVIRONMENT^^}_BUCKET_NAME" "${{ secrets.BUCKET_NAME }}"
           
-          # Dynamic Parsing Secrets
+          # Dynamic Parsing Secrets - use the variable (override or generated)
           if [ -n "${{ secrets.DYNAMIC_PARSING_ENABLED }}" ]; then
             create_or_update_secret "${ENVIRONMENT^^}_DYNAMIC_PARSING_ENABLED" "${{ secrets.DYNAMIC_PARSING_ENABLED }}"
           fi
-          if [ -n "${{ secrets.DYNAMIC_PARSER_URL }}" ]; then
-            create_or_update_secret "${ENVIRONMENT^^}_DYNAMIC_PARSER_URL" "${{ secrets.DYNAMIC_PARSER_URL }}"
+          if [ -n "$DYNAMIC_PARSER_URL" ]; then
+            create_or_update_secret "${ENVIRONMENT^^}_DYNAMIC_PARSER_URL" "$DYNAMIC_PARSER_URL"
           fi
           
           # GitHub secret is already base64 encoded to preserve JSON formatting

@@ -1222,7 +1222,7 @@ async def trigger_dynamic_parsing(item: dict, authorized: Dict[str, Union[bool, 
             headers['Authorization'] = f"Bearer {access_token}"
             
         # Note: In a real production env, this might be better as an async job
-        response = requests.post(extract_endpoint, json=payload, headers=headers, timeout=60)
+        response = requests.post(extract_endpoint, json=payload, headers=headers, timeout=120)
         
         if response.status_code != 200:
             logging_start.logger.error(f"Dynamic parser returned error: {response.status_code} - {response.text}")
@@ -1252,7 +1252,7 @@ async def trigger_dynamic_parsing(item: dict, authorized: Dict[str, Union[bool, 
             }
             
     except requests.exceptions.Timeout:
-        return {"status": "error", "message": "Parsing timed out after 60 seconds"}
+        return {"status": "error", "message": "Parsing timed out after 120 seconds"}
     except Exception as e:
         logging_start.logger.error(f"Error calling dynamic parser: {str(e)}")
         return {"status": "error", "message": f"Internal error: {str(e)}"}
