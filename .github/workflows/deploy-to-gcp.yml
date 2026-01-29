@@ -125,6 +125,7 @@ jobs:
           # Generate service URLs using project number
           API_BASE_URL="https://${ENVIRONMENT}-bem-reports-${PROJECT_NUMBER}.${REGION}.run.app"
           STREAMLIT_URL="https://${ENVIRONMENT}-d3p-viewer-${PROJECT_NUMBER}.${REGION}.run.app"
+          DYNAMIC_PARSER_URL="https://${ENVIRONMENT}-extraction-service-${PROJECT_NUMBER}.${REGION}.run.app"
           
           # Use provided REDIRECT_URL or generate default
           if [ -n "${{ secrets.REDIRECT_URL }}" ]; then
@@ -402,15 +403,17 @@ jobs:
           
           echo "📋 Deploying service with secrets: $SECRET_REFS"
           
-          # Deploy - --update-secrets will replace all secret references, removing any not in the list
-          # This will automatically remove old references like TEST_EMAIL that are no longer in SECRET_REFS
           gcloud run deploy "$SERVICE_NAME" \
             --image="$IMAGE_NAME" \
             --region=us-central1 \
             --platform=managed \
             --allow-unauthenticated \
             --update-secrets="$SECRET_REFS" \
+<<<<<<< HEAD
             --set-env-vars="ENV=$ENVIRONMENT,DYNAMIC_PARSER_URL=$DYNAMIC_PARSER_URL"
+=======
+            --set-env-vars="ENV=$ENVIRONMENT,DYNAMIC_PARSING_ENABLED=true,DYNAMIC_PARSER_URL=${{ needs.setup.outputs.dynamic_parser_url }}"
+>>>>>>> a8bb076 (feat: Add dynamic parser URL and enable dynamic parsing to the GCP deployment workflow.)
 
   deploy-frontend:
     needs: setup
