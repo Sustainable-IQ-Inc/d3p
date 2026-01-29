@@ -37,11 +37,12 @@ jobs:
       frontend_changed: ${{ steps.filter.outputs.frontend }}
       backend_changed: ${{ steps.filter.outputs.backend }}
       visualizer_changed: ${{ steps.filter.outputs.visualizer }}
+      skip_db_reset: ${{ steps.check-pr-labels.outputs.skip_db_reset }}
     steps:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      
+
       - name: Check for changes
         uses: dorny/paths-filter@v2
         id: filter
@@ -53,7 +54,44 @@ jobs:
               - 'backend/**'
             visualizer:
               - 'visualizer/**'
-      
+
+      - name: Check PR labels for skip-db-reset
+        id: check-pr-labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SKIP_DB_RESET="false"
+
+          # Check commit message for [skip-db-reset] flag (works for direct pushes)
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          if echo "$COMMIT_MSG" | grep -q "\[skip-db-reset\]"; then
+            echo "✅ Found '[skip-db-reset]' in commit message"
+            SKIP_DB_RESET="true"
+          fi
+
+          # Also check PR labels if this came from a merged PR
+          if [ "$SKIP_DB_RESET" = "false" ]; then
+            PR_NUMBER=$(gh pr list --state merged --search "${{ github.sha }}" --json number --jq '.[0].number' 2>/dev/null || echo "")
+
+            if [ -n "$PR_NUMBER" ]; then
+              echo "Found merged PR #$PR_NUMBER for commit ${{ github.sha }}"
+
+              # Check if PR has the skip-db-reset label
+              LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' 2>/dev/null || echo "")
+              echo "PR labels: $LABELS"
+
+              if echo "$LABELS" | grep -q "skip-db-reset"; then
+                echo "✅ Found 'skip-db-reset' label on PR #$PR_NUMBER"
+                SKIP_DB_RESET="true"
+              fi
+            else
+              echo "No merged PR found for commit ${{ github.sha }} (may be a direct push)"
+            fi
+          fi
+
+          echo "skip_db_reset=$SKIP_DB_RESET" >> $GITHUB_OUTPUT
+          echo "Skip DB reset: $SKIP_DB_RESET"
+
       - name: Debug outputs
         run: |
           echo "Event name: ${{ github.event_name }}"
@@ -61,6 +99,7 @@ jobs:
           echo "Backend changed: ${{ steps.filter.outputs.backend }}"
           echo "Visualizer changed: ${{ steps.filter.outputs.visualizer }}"
           echo "Changes detected: ${{ steps.filter.outputs.changes }}"
+          echo "Skip DB reset: ${{ steps.check-pr-labels.outputs.skip_db_reset }}"
 
   deploy-all:
     needs: check-changes
@@ -71,6 +110,7 @@ jobs:
       deploy_frontend: ${{ (github.event_name == 'push' && needs.check-changes.outputs.frontend_changed == 'true') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_frontend == 'true') }}
       deploy_backend: ${{ (github.event_name == 'push' && needs.check-changes.outputs.backend_changed == 'true') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_backend == 'true') }}
       deploy_visualizer: ${{ (github.event_name == 'push' && needs.check-changes.outputs.visualizer_changed == 'true') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_visualizer == 'true') }}
+      skip_db_reset: ${{ needs.check-changes.outputs.skip_db_reset == 'true' }}
     secrets:
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
       SIGNING_SA_CREDENTIALS: ${{ secrets.SIGNING_SA_CREDENTIALS }}

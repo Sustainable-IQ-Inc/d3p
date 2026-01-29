@@ -6,6 +6,10 @@ on:
       environment:
         required: true
         type: string
+      skip_db_reset:
+        required: false
+        type: boolean
+        default: false
     secrets:
       GCP_SA_KEY:
         required: true
@@ -93,16 +97,26 @@ jobs:
           echo "✅ Successfully linked to Supabase project"
           
           if [ "$ENVIRONMENT" = "staging" ]; then
-            echo "🔄 Resetting staging database (with seeds)..."
-            echo "y" | supabase db reset --linked || {
-              echo "❌ Failed to reset staging database"
-              exit 1
-            }
-            echo "📤 Pushing database changes including seeds..."
-            supabase db push --include-seed || {
-              echo "❌ Failed to push database changes with seeds"
-              exit 1
-            }
+            SKIP_DB_RESET="${{ inputs.skip_db_reset }}"
+            if [ "$SKIP_DB_RESET" = "true" ]; then
+              echo "⏭️  Skipping database reset (skip-db-reset label detected on PR)"
+              echo "📤 Running migrations only (no reset, no seeds)..."
+              supabase db push || {
+                echo "❌ Failed to push database changes"
+                exit 1
+              }
+            else
+              echo "🔄 Resetting staging database (with seeds)..."
+              echo "y" | supabase db reset --linked || {
+                echo "❌ Failed to reset staging database"
+                exit 1
+              }
+              echo "📤 Pushing database changes including seeds..."
+              supabase db push --include-seed || {
+                echo "❌ Failed to push database changes with seeds"
+                exit 1
+              }
+            fi
           else
             echo "📤 Running production migrations only (no reset, no seeds)..."
             supabase db push || {
