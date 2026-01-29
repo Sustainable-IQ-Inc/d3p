@@ -409,11 +409,7 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --update-secrets="$SECRET_REFS" \
-<<<<<<< HEAD
-            --set-env-vars="ENV=$ENVIRONMENT,DYNAMIC_PARSER_URL=$DYNAMIC_PARSER_URL"
-=======
             --set-env-vars="ENV=$ENVIRONMENT,DYNAMIC_PARSING_ENABLED=true,DYNAMIC_PARSER_URL=${{ needs.setup.outputs.dynamic_parser_url }}"
->>>>>>> a8bb076 (feat: Add dynamic parser URL and enable dynamic parsing to the GCP deployment workflow.)
 
   deploy-frontend:
     needs: setup
