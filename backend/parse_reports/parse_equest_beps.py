@@ -18,32 +18,38 @@ import os
 current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def parse_report_equest_beps(url):
+  from utils import download_to_temp_file
   warnings = []
+  temp_path = None
 
   try:   
-        #filename = Path('temp/report.pdf')
+        # Stream download to disk if it's a URL
+        if url.startswith('http'):
+            temp_path = download_to_temp_file(url)
+            pdf_source = temp_path
+        else:
+            pdf_source = url
 
-        #takes URL from Airatble and stores that PDF to the path, above
-        response = requests.get(url)
-        pdf_file = io.BytesIO(response.content)
-        with pdfplumber.open(pdf_file) as pdf:
+        page_no_to_use = None
+        with pdfplumber.open(pdf_source) as pdf:
             pages = pdf.pages
-            for i,pg in enumerate(pages):
-                txt = pages[i].extract_text()
-                #look for REPORT- BEPS Building Energy Performance  text
-                found_text = txt.find("REPORT- BEPS Building Energy Performance")
-                if(found_text!=-1):
+            for i, pg in enumerate(pages):
+                # Extract text from one page at a time to minimize memory
+                txt = pg.extract_text()
+                if not txt:
+                    continue
                 
-                    page_no_to_use=i
-                    print("page"+str(i))
+                # look for REPORT- BEPS Building Energy Performance text
+                if "REPORT- BEPS Building Energy Performance" in txt:
+                    page_no_to_use = i
+                    print(f"Found BEPS report on page {i}")
+                    break # EARLY EXIT: Stop searching once found
+            
+            if page_no_to_use is None:
+                raise ValueError("Could not find 'REPORT- BEPS Building Energy Performance' in PDF")
 
-        page_to_use = pdf.pages[page_no_to_use]
-
-        #im=first_page.to_image()
-        #im.reset().debug_tablefinder()
-
-        #im.debug_tablefinder()
-        all_text = page_to_use.extract_text()
+            page_to_use = pdf.pages[page_no_to_use]
+            all_text = page_to_use.extract_text()
 
 
 
@@ -235,5 +241,13 @@ def parse_report_equest_beps(url):
 
         return {'df':df_beps,
                 'warnings':warnings}
-  except ValueError as err:
-    print("error")
+  except Exception as err:
+    print(f"Error parsing eQUEST BEPS report: {err}")
+    raise
+  finally:
+    # Cleanup temporary file
+    if temp_path and os.path.exists(temp_path):
+        try:
+            os.remove(temp_path)
+        except:
+            pass

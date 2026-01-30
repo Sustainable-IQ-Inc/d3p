@@ -231,3 +231,29 @@ def fuel_category_override(fuel_category):
     else:
         return fuel_category
 
+def download_to_temp_file(url):
+    """
+    Stream a file from a URL to a temporary location on disk.
+    Returns the path to the temporary file.
+    The caller is responsible for deleting the file when done.
+    """
+    import requests
+    import tempfile
+    
+    # Create a temporary file that won't be deleted automatically on close
+    # so we can open it with pdfplumber separately
+    fd, temp_path = tempfile.mkstemp(suffix='.pdf')
+    
+    try:
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with os.fdopen(fd, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        return temp_path
+    except Exception as e:
+        # If download fails, cleanup the fd and file
+        os.close(fd)
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise e
