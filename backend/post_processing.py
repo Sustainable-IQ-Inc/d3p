@@ -35,12 +35,7 @@ def post_process(df_output):
   #imports the list of standard fields
   df_fields = pd.read_csv(os.path.join(current_dir, 'dependencies/field_list.csv'))
 
-  column_fields=[]
-  df_cf=pd.Series(column_fields,dtype=object)
-
-  for i in range(df_fields.shape[0]):
-
-    df_cf = pd.concat([df_cf,pd.Series([df_fields.iloc[i,0]])])
+  df_fields = pd.read_csv(os.path.join(current_dir, 'dependencies/field_list.csv'))
 
   df_2_full=pd.DataFrame()
   df_output = df_output.reset_index(drop=True)
@@ -166,23 +161,18 @@ def post_process(df_output):
 
     df_fields_list['total_val']=0
     df_fields_list['units']=energy_units
-    column_fields=[]
-    df_cf=pd.DataFrame(column_fields,dtype=object)
+    
     for i in range(df_fields_list.shape[0]):
       fieldname=df_fields_list.iloc[i, 0]
-
       df_fields_list.iloc[i,df_fields_list.columns.get_loc('total_val')] = df_cm_output.loc[df_cm_output['eeu_name'] == fieldname, energy_value_to_use].sum()*energy_multiplier/divide_by_val
-
-      df_cf = pd.concat([df_cf,pd.Series([df_fields_list.iloc[i,0]])])
-      
-    df_cf = df_cf.reset_index(drop=True)
 
     #create a list of the fuel sources within df_fields
     fuel_sources=df_fields_list['fuel_source'].unique().tolist()
     num_fuel_sources=len(fuel_sources)
     total_energy=0
 
-    #run look for each of the fuel sources
+    #run looking for each of the fuel sources
+    new_rows = []
     for j in range(num_fuel_sources):
       this_fuel_source = fuel_sources[j]
 
@@ -191,32 +181,17 @@ def post_process(df_output):
       total_energy=total_energy+fuel_source_total
 
       #create a new row for the fuel source total which will be added to the main df
-      df_row_total_energy_fuel_source = {'field':'total_'+this_fuel_source,'fuel_source' : this_fuel_source,'total_val': fuel_source_total,'units': energy_units}
+      new_rows.append({'field':'total_'+this_fuel_source,'fuel_source' : this_fuel_source,'total_val': fuel_source_total,'units': energy_units})
 
-      #add the new row to the main df
-      df_fields_list = pd.concat([df_fields_list,pd.DataFrame([df_row_total_energy_fuel_source])],ignore_index=True)
+    # Add other summary rows
+    new_rows.append({'field':'use_type_total_area','fuel_source' : 'na','total_val': conditioned_sf,'units': 'sf'})
+    new_rows.append({'field':'total_energy','fuel_source' : 'na','total_val': total_energy,'units': 'na'})
+    new_rows.append({'field':'report_type','fuel_source' : 'na','total_val': report_type,'units': 'na'})
+    new_rows.append({'field':'project_name','fuel_source' : 'na','total_val': project_name,'units': 'na'})
 
-    #create a row for the use_type_total_area
-    df_row_use_type_total_area={'field':'use_type_total_area','fuel_source' : 'na','total_val': conditioned_sf,'units': 'sf'}
-  
-    #add the new row to the main df
-    df_fields_list = pd.concat([df_fields_list,pd.DataFrame([df_row_use_type_total_area])])
-
-    #create a row for the total energy
-    df_row_total_energy={'field':'total_energy','fuel_source' : 'na','total_val': total_energy,'units': 'na'}
-
-    #add the new row to the main df
-    df_fields_list = pd.concat([df_fields_list,pd.DataFrame([df_row_total_energy])])
-
-    #create a new row to show the report type
-    df_row_report_type={'field':'report_type','fuel_source' : 'na','total_val': report_type,'units': 'na'}
-    #add the new row to the main df
-    df_fields_list = pd.concat([df_fields_list,pd.DataFrame([df_row_report_type])])
-
-    #create a new row to show the project name
-    df_row_project_name={'field':'project_name','fuel_source' : 'na','total_val': project_name,'units': 'na'}
-    #add the new row to the main df
-    df_fields_list = pd.concat([df_fields_list,pd.DataFrame([df_row_project_name])])
+    # Concatenate all new rows at once
+    if new_rows:
+      df_fields_list = pd.concat([df_fields_list, pd.DataFrame(new_rows)], ignore_index=True)
 
     df_new = df_fields_list.T
     

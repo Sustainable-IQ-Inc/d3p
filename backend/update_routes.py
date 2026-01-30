@@ -51,6 +51,9 @@ def update_project_record(item,user_id):
     # Remove user_id from item_data - it's stored in projects table but shouldn't be updated (only used for history tracking)
     item_data.pop('user_id', None)
     
+    # use_type_total_area doesn't belong in projects or uploads table - it belongs in eeu_data
+    gsf_value = item_data.pop('use_type_total_area', None)
+    
     print(f"update_project_record called with item_data keys: {list(item_data.keys())}")
     print(f"item_data values: {item_data}")
 
@@ -115,6 +118,26 @@ def update_project_record(item,user_id):
     else:
         print("No fields to update in projects table")
     
+    # If GSF was updated, also update the EEU data
+    if gsf_value is not None:
+        try:
+            print(f"Syncing GSF change ({gsf_value}) to EEU data")
+            latest_eeu_data = get_latest_eeu_data(project_id)
+            if latest_eeu_data['status'] == 'success':
+                # Update baseline if it exists
+                if latest_eeu_data['latest_baseline'] is not None:
+                    eeu_id = latest_eeu_data['latest_baseline']
+                    eeu_update = models.EEUUpdate(eeu_id=eeu_id, use_type_total_area=gsf_value)
+                    update_eeu_record(eeu_update, user_id)
+                
+                # Update design if it exists
+                if latest_eeu_data['latest_design'] is not None:
+                    eeu_id = latest_eeu_data['latest_design']
+                    eeu_update = models.EEUUpdate(eeu_id=eeu_id, use_type_total_area=gsf_value)
+                    update_eeu_record(eeu_update, user_id)
+        except Exception as e:
+            print(f"Error updating EEU data for GSF change in project update: {e}")
+
     # If fields that appear in project_energy_summary view are being updated, also update uploads
     if upload_update_data:
         print(f"Syncing fields to uploads table: {upload_update_data}")
@@ -429,6 +452,9 @@ def update_upload_record(item,user_id):
             print(f"Error validating custom_project_id: {e}")
             return "validation_error"
     
+    # use_type_total_area doesn't belong in projects or uploads table - it belongs in eeu_data
+    gsf_value = item_data.pop('use_type_total_area', None)
+
     try:
         # Retrieve the current state of the record
         current_data_response = supabase.table('uploads')\
@@ -454,9 +480,8 @@ def update_upload_record(item,user_id):
         return "error"
     
     # If GSF was updated, also update the EEU data
-    if 'use_type_total_area' in item_data:
+    if gsf_value is not None:
         try:
-            gsf_value = item_data['use_type_total_area']
             latest_eeu_data = get_latest_eeu_data(project_id)
             if latest_eeu_data['status'] == 'success':
                 # Update baseline if it exists

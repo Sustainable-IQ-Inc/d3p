@@ -398,10 +398,14 @@ jobs:
             SECRET_REFS="$SECRET_REFS,DYNAMIC_PARSING_ENABLED=${ENVIRONMENT^^}_DYNAMIC_PARSING_ENABLED:latest"
           fi
           
-          # Use generated parser URL
-          DYNAMIC_PARSER_URL="${{ needs.setup.outputs.dynamic_parser_url }}"
+          # Build SET_ENV_VARS conditionally to avoid collision with secrets
+          SET_ENV_VARS="ENV=$ENVIRONMENT,DYNAMIC_PARSER_URL=${{ needs.setup.outputs.dynamic_parser_url }}"
+          if [[ "$SECRET_REFS" != *"DYNAMIC_PARSING_ENABLED"* ]]; then
+            SET_ENV_VARS="$SET_ENV_VARS,DYNAMIC_PARSING_ENABLED=true"
+          fi
           
           echo "📋 Deploying service with secrets: $SECRET_REFS"
+          echo "📋 Deploying service with env vars: $SET_ENV_VARS"
           
           gcloud run deploy "$SERVICE_NAME" \
             --image="$IMAGE_NAME" \
@@ -409,7 +413,7 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --update-secrets="$SECRET_REFS" \
-            --set-env-vars="ENV=$ENVIRONMENT,DYNAMIC_PARSING_ENABLED=true,DYNAMIC_PARSER_URL=${{ needs.setup.outputs.dynamic_parser_url }}"
+            --set-env-vars="$SET_ENV_VARS"
 
   deploy-frontend:
     needs: setup
