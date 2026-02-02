@@ -44,7 +44,7 @@ google-cloud-storage==2.14.0
 google-crc32c==1.5.0
 google-resumable-media==2.7.0
 googleapis-common-protos==1.62.0
-gotrue==2.1.0
+gotrue==2.27.2
 gql==3.5.0
 graphql-core==3.2.3
 grpc-google-iam-v1==0.12.4
@@ -86,7 +86,7 @@ Pint==0.23
 plotly==5.14.1
 plotly-express==0.4.1
 pluggy==1.4.0
-postgrest==0.15.0
+postgrest==2.27.2
 proto-plus==1.23.0
 protobuf==3.20.3
 py==1.11.0
@@ -110,7 +110,7 @@ python-multipart==0.0.7
 pytz==2024.1
 PyYAML==6.0.1
 rapidfuzz==2.13.7
-realtime==1.0.2
+realtime==2.27.2
 referencing==0.33.0
 requests==2.32.0
 requests-toolbelt==1.0.0
@@ -127,12 +127,12 @@ soupsieve==2.5
 st-btn-select==0.1.2
 starlette==0.35.1
 statsmodels==0.14.1
-storage3==0.7.0
+storage3==2.27.2
 streamlit==1.37.0
 streamlit-authenticator==0.2.1
 StrEnum==0.4.15
 supabase==2.27.2
-supafunc==0.3.3
+supafunc==2.27.2
 tabula==1.0.5
 tabula-py==2.5.1
 tenacity==8.2.3

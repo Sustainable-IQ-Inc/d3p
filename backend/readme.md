@@ -25,3 +25,6 @@ After merging staging into main, you need to run migrations if they did not run 
 
 
 op run --env-file=backend/.env -- python backend/main.py
+
+**To test build locally before deploying**
+docker build -f backend/Dockerfile -t d3p-backend .
