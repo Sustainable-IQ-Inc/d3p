@@ -100,7 +100,7 @@ class TestProjectSubmission:
         try:
             response = client.post("/submit_project/", json=project_data)
             assert response.status_code == 200
-            assert response.json() == "error upload table"
+            assert response.json() == {'error': 'Error inserting upload record: DB Error', 'status': 'failed'}
         finally:
             app.dependency_overrides.clear()
 

@@ -258,7 +258,7 @@ class TestProjectUpdate:
         update = ProjectUpdate(**data)
         assert update.project_id == "project_123"
         assert update.project_name == "Updated Project Name"
-        assert update.project_use_type_id == "2"
+        assert update.project_use_type_id == 2
         assert update.custom_project_id == "CUSTOM_001"
         assert update.user_id == "user_456"
     

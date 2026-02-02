@@ -139,6 +139,7 @@ class SaveAIParsedData(FlexibleModel):
     energy_units: Optional[str] = 'mbtu'
     user_id: Optional[str] = None
     company_id: Optional[str] = None
+    eeu_id: Optional[int] = None
 
 
 class MultiProjectExcelUpload(BaseModel):

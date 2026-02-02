@@ -5,7 +5,7 @@ import asyncio
 import json
 import models
 from utils import verify_token, add_event_history, supabase, sanitize_filename
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, Tuple
 from uuid import uuid4
 from gcs_upload import upload_blob, get_signed_url_from_url
 import os
@@ -132,13 +132,13 @@ def create_failed_upload_record(
     company_id: str,
     baseline_design: Optional[str] = None,
     report_type_id: Optional[int] = None
-) -> Optional[int]:
+) -> Tuple[Optional[int], Optional[int]]:
     """Create an upload record with failed status and create eeu_data record with file_url"""
     try:
         failed_status_id = get_upload_status_id('failed')
         if not failed_status_id:
             logging_start.logger.error("Failed status not found in enum_upload_statuses")
-            return None
+            return None, None
         
         # First, create the upload record
         # Note: user_id is a UUID from auth, but uploads table may not have this field
@@ -168,7 +168,7 @@ def create_failed_upload_record(
         
         if not data or len(data) <= 1 or not data[1]:
             logging_start.logger.error("Failed to create upload record")
-            return None
+            return None, None
         
         upload_id = data[1][0]['id']
         logging_start.logger.info(f"Created failed upload record {upload_id}")
@@ -195,16 +195,17 @@ def create_failed_upload_record(
             eeu_id = eeu_insert_result[1][0]['id']
             logging_start.logger.info(f"Created eeu_data record {eeu_id} for failed upload {upload_id}")
         else:
+            eeu_id = None
             logging_start.logger.warning(f"Failed to create eeu_data record for upload {upload_id}, but upload was created")
         
         # Note: Email notification will be sent when the user completes the form in submit_project
         # This ensures admins are only notified when the user has provided all necessary information
         
-        return upload_id
+        return upload_id, eeu_id
             
     except Exception as e:
         logging_start.logger.error(f"Error creating failed upload record: {e}", exc_info=True)
-    return None
+    return None, None
 
 def update_eeu_record(eeu_id, upload_id):
             eeu_data_dict  = dict()
@@ -292,7 +293,7 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
                 logging_start.logger.info(f"Creating failed upload record for file {file_name}, user_id: {user_id}, company_id: {company_id}")
                 failed_url = move_file_to_failed_folder(url, file_name)
                 if failed_url:
-                    upload_id = create_failed_upload_record(
+                    upload_id, eeu_id = create_failed_upload_record(
                         failed_url, file_name, error_msg, user_id, company_id,
                         baseline_design, report_type
                     )
@@ -300,6 +301,7 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
                         logging_start.logger.info(f"Successfully created failed upload record {upload_id}")
                     else:
                         logging_start.logger.error(f"Failed to create upload record for {file_name}")
+                        eeu_id = None
                 else:
                     logging_start.logger.error(f"Failed to move file {file_name} to failed_uploads folder")
             else:
@@ -318,6 +320,10 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
                 # Use the failed_url if available, otherwise fallback to original url
                 response['file_url'] = failed_url if 'failed_url' in locals() and failed_url else url
                 response['file_name'] = file_name
+                if 'eeu_id' in locals() and eeu_id:
+                    response['eeu_id'] = eeu_id
+                if 'upload_id' in locals() and upload_id:
+                    response['upload_id'] = upload_id
                 
             return response
     else:
@@ -330,10 +336,14 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
             if user_id and company_id:
                 failed_url = move_file_to_failed_folder(url, file_name)
                 if failed_url:
-                    create_failed_upload_record(
+                    upload_id, eeu_id = create_failed_upload_record(
                         failed_url, file_name, error_msg, user_id, company_id,
                         baseline_design, report_type
                     )
+                    if eeu_id:
+                        results['eeu_id'] = eeu_id
+                    if upload_id:
+                        results['upload_id'] = upload_id
             return {
                 'status': 'error',
                 'message': 'File processing failed',
@@ -352,10 +362,12 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
         if user_id and company_id:
             failed_url = move_file_to_failed_folder(url, file_name)
             if failed_url:
-                create_failed_upload_record(
+                upload_id, eeu_id = create_failed_upload_record(
                     failed_url, file_name, error_msg, user_id, company_id,
                     baseline_design, report_type
                 )
+                if eeu_id:
+                    errors['eeu_id'] = eeu_id # This might be tricky as errors is a string or list
         return {
             'status': 'error',
             'message': error_msg,
@@ -422,16 +434,22 @@ def upload_report(url, baseline_design, report_type=None, conditioned_area=None,
         if user_id and company_id:
             failed_url = move_file_to_failed_folder(url, file_name)
             if failed_url:
-                create_failed_upload_record(
+                upload_id, eeu_id = create_failed_upload_record(
                     failed_url, file_name, error_msg, user_id, company_id,
                     baseline_design, results.get('report_type')
                 )
-        return {
-            'status': 'error',
-            'errors': error_msg,
-            'warnings': warnings_str,
-            'message': 'File processing failed during database insertion'
-        }
+            
+            error_response = {
+                'status': 'error',
+                'errors': error_msg,
+                'warnings': warnings_str,
+                'message': 'File processing failed during database insertion'
+            }
+            if 'eeu_id' in locals() and eeu_id:
+                error_response['eeu_id'] = eeu_id
+            if 'upload_id' in locals() and upload_id:
+                error_response['upload_id'] = upload_id
+            return error_response
     avg_energy = float(eeu_data_to_insert[0]['total_energy'])*1000 / float(eeu_data_to_insert[0]['use_type_total_area'])
 
     return {'status': "success",
@@ -1200,7 +1218,7 @@ async def trigger_dynamic_parsing(item: dict, authorized: Dict[str, Union[bool, 
     if not file_url:
         return {"status": "error", "message": "file_url is required"}
     
-    parser_url = os.environ.get('DYNAMIC_PARSER_URL', 'http://localhost:8000')
+    parser_url = os.environ.get('DYNAMIC_PARSER_URL') or 'http://localhost:8000'
     extract_endpoint = f"{parser_url}/api/v1/extract"
     
     try:
@@ -1374,20 +1392,48 @@ async def save_ai_parsed_data(item: models.SaveAIParsedData, authorized: Dict[st
 
         logging_start.logger.info(f"Saving aligned AI data: {final_record['file_name']}")
         
-        data, count = supabase.table("eeu_data")\
-            .insert(final_record)\
-            .execute()
+        # 3. Check if we should update an existing record or insert a new one
+        eeu_id = item.eeu_id
+        
+        # If no eeu_id provided, try to find an existing record by file_url and baseline_design
+        if not eeu_id:
+            try:
+                existing_data, _ = supabase.table("eeu_data")\
+                    .select("id")\
+                    .eq("file_url", item.file_url)\
+                    .eq("baseline_design", item.baseline_design)\
+                    .limit(1)\
+                    .execute()
+                if existing_data and len(existing_data) > 1 and existing_data[1]:
+                    eeu_id = existing_data[1][0]["id"]
+                    logging_start.logger.info(f"Found existing eeu_data record {eeu_id} by file_url matching")
+            except Exception as e:
+                logging_start.logger.warning(f"Error checking for existing eeu_data record: {e}")
+
+        if eeu_id:
+            # Update existing record
+            logging_start.logger.info(f"Updating existing eeu_data record {eeu_id}")
+            data, count = supabase.table("eeu_data")\
+                .update(final_record)\
+                .eq("id", eeu_id)\
+                .execute()
+        else:
+            # Insert new record
+            logging_start.logger.info("Inserting new eeu_data record")
+            data, count = supabase.table("eeu_data")\
+                .insert(final_record)\
+                .execute()
             
         if data and len(data) > 1 and data[1]:
-            new_id = data[1][0]["id"]
-            logging_start.logger.info(f"Successfully saved Aligned AI data, eeu_id: {new_id}")
+            result_id = data[1][0]["id"]
+            logging_start.logger.info(f"Successfully saved Aligned AI data, eeu_id: {result_id}")
             return {
                 "status": "success",
-                "eeu_id": new_id,
+                "eeu_id": result_id,
                 "message": "Data saved successfully"
             }
         else:
-            return {"status": "error", "message": "Failed to insert data into eeu_data"}
+            return {"status": "error", "message": "Failed to save data into eeu_data"}
             
     except Exception as e:
         logging_start.logger.error(f"Error saving AI parsed data: {str(e)}", exc_info=True)
