@@ -4,44 +4,20 @@
 #
 #    pip-compile requirements.in
 #
-aiohttp==3.9.3
-    # via gql
-aiosignal==1.3.1
-    # via aiohttp
-altair==5.2.0
-    # via
-    #   -r requirements.in
-    #   streamlit
 annotated-types==0.6.0
     # via pydantic
 anyio==4.4.0
     # via
-    #   gql
     #   httpx
     #   starlette
 attrs==23.2.0
-    # via
-    #   aiohttp
-    #   jsonschema
-    #   pytest
-    #   referencing
-backoff==2.2.1
-    # via gql
-bcrypt==4.1.2
-    # via
-    #   -r requirements.in
-    #   streamlit-authenticator
+    # via pytest
 beautifulsoup4==4.11.1
     # via -r requirements.in
-blinker==1.7.0
-    # via streamlit
-botocore==1.35.16
-    # via gql
 cachetools==5.5.2
     # via
     #   google-auth
     #   pyiceberg
-    #   streamlit
 certifi==2024.7.4
     # via
     #   httpcore
@@ -55,53 +31,23 @@ charset-normalizer==2.1.1
     #   requests
 click==8.1.7
     # via
-    #   -r requirements.in
-    #   flask
     #   pyiceberg
-    #   streamlit
     #   uvicorn
-contourpy==1.3.2
-    # via matplotlib
 cryptography==43.0.1
     # via
+    #   -r requirements.in
     #   pdfminer-six
     #   pyjwt
-cycler==0.11.0
-    # via matplotlib
 deprecation==2.1.0
     # via
     #   postgrest
     #   storage3
-distro==1.9.0
-    # via tabula-py
 et-xmlfile==1.1.0
     # via openpyxl
-extra-streamlit-components==0.1.56
-    # via
-    #   -r requirements.in
-    #   streamlit-authenticator
 fastapi==0.109.1
     # via -r requirements.in
-flask==2.2.5
-    # via -r requirements.in
-fonttools==4.42.1
-    # via matplotlib
-frozenlist==1.4.1
-    # via
-    #   aiohttp
-    #   aiosignal
 fsspec==2026.1.0
     # via pyiceberg
-geographiclib==2.0
-    # via geopy
-geopy==2.4.1
-    # via -r requirements.in
-gitdb==4.0.11
-    # via gitpython
-gitpython==3.1.41
-    # via
-    #   -r requirements.in
-    #   streamlit
 google-api-core[grpc]==1.34.0
     # via
     #   google-cloud-appengine-logging
@@ -140,12 +86,6 @@ googleapis-common-protos[grpc]==1.62.0
     #   google-cloud-audit-log
     #   grpc-google-iam-v1
     #   grpcio-status
-gql[all]==3.5.0
-    # via
-    #   -r requirements.in
-    #   noloco
-graphql-core==3.2.3
-    # via gql
 grpc-google-iam-v1==0.12.4
     # via
     #   google-cloud-logging
@@ -172,7 +112,6 @@ httpcore==1.0.8
     # via httpx
 httpx[http2]==0.28.1
     # via
-    #   gql
     #   postgrest
     #   storage3
     #   supabase
@@ -188,94 +127,33 @@ idna==3.7
     #   yarl
 iniconfig==2.0.0
     # via pytest
-itsdangerous==2.1.2
-    # via flask
-jinja2==3.1.4
-    # via
-    #   altair
-    #   flask
-    #   pydeck
-jmespath==1.0.1
-    # via botocore
-jsonschema==4.21.1
-    # via altair
-jsonschema-specifications==2023.12.1
-    # via jsonschema
-kiwisolver==1.4.5
-    # via matplotlib
-lxml==5.3.0
-    # via -r requirements.in
 markdown-it-py==3.0.0
     # via rich
-markupsafe==2.1.5
-    # via
-    #   jinja2
-    #   werkzeug
-matplotlib==3.10.5
-    # via
-    #   -r requirements.in
-    #   wordcloud
 mdurl==0.1.2
     # via markdown-it-py
+memory-profiler==0.61.0
+    # via -r requirements.in
 mmh3==5.2.0
     # via pyiceberg
 multidict==6.0.5
-    # via
-    #   aiohttp
-    #   yarl
-noloco==0.6.1
-    # via -r requirements.in
+    # via yarl
 numpy==1.26.4
-    # via
-    #   -r requirements.in
-    #   altair
-    #   contourpy
-    #   matplotlib
-    #   pandas
-    #   patsy
-    #   pyarrow
-    #   pydeck
-    #   scipy
-    #   statsmodels
-    #   streamlit
-    #   tabula-py
-    #   wordcloud
+    # via pandas
 openpyxl==3.1.5
     # via -r requirements.in
 packaging==23.2
     # via
-    #   altair
     #   deprecation
     #   gunicorn
-    #   matplotlib
-    #   plotly
     #   pytest
-    #   statsmodels
-    #   streamlit
 pandas==2.3.1
-    # via
-    #   -r requirements.in
-    #   altair
-    #   statsmodels
-    #   streamlit
-    #   tabula-py
-patsy==0.5.6
-    # via statsmodels
+    # via -r requirements.in
 pdfminer-six==20221105
     # via pdfplumber
 pdfplumber==0.7.6
     # via -r requirements.in
 pillow==10.3.0
-    # via
-    #   -r requirements.in
-    #   matplotlib
-    #   pdfplumber
-    #   streamlit
-    #   wordcloud
-pint==0.23
-    # via -r requirements.in
-plotly==5.14.1
-    # via -r requirements.in
+    # via pdfplumber
 pluggy==1.4.0
     # via pytest
 postgrest==2.27.2
@@ -297,13 +175,12 @@ protobuf==3.20.3
     #   googleapis-common-protos
     #   grpcio-status
     #   proto-plus
-    #   streamlit
+psutil==7.2.2
+    # via
+    #   -r requirements.in
+    #   memory-profiler
 py==1.11.0
     # via pytest
-pyairtable==1.4.0
-    # via -r requirements.in
-pyarrow==15.0.0
-    # via streamlit
 pyasn1==0.5.1
     # via
     #   pyasn1-modules
@@ -322,10 +199,6 @@ pydantic==2.12.5
     #   supabase-auth
 pydantic-core==2.41.5
     # via pydantic
-pydash==7.0.7
-    # via noloco
-pydeck==0.8.1b0
-    # via streamlit
 pygments==2.17.2
     # via rich
 pyiceberg==0.10.0
@@ -333,98 +206,51 @@ pyiceberg==0.10.0
 pyjwt[crypto]==2.11.0
     # via
     #   -r requirements.in
-    #   streamlit-authenticator
     #   supabase-auth
 pyparsing==3.3.2
-    # via
-    #   matplotlib
-    #   pyiceberg
+    # via pyiceberg
 pyroaring==1.0.3
     # via pyiceberg
 pytest==6.2.5
     # via -r requirements.in
 python-dateutil==2.8.2
     # via
-    #   botocore
-    #   matplotlib
     #   pandas
     #   strictyaml
 python-dotenv==1.0.0
     # via -r requirements.in
 python-http-client==3.3.7
     # via sendgrid
-python-multipart==0.0.7
-    # via -r requirements.in
 pytz==2024.1
     # via pandas
-pyyaml==6.0.1
-    # via
-    #   -r requirements.in
-    #   streamlit-authenticator
 realtime==2.27.2
     # via supabase
-referencing==0.33.0
-    # via
-    #   jsonschema
-    #   jsonschema-specifications
 requests==2.32.0
     # via
     #   -r requirements.in
     #   google-api-core
     #   google-cloud-storage
-    #   gql
-    #   pyairtable
     #   pyiceberg
-    #   requests-toolbelt
-    #   streamlit
-requests-toolbelt==1.0.0
-    # via gql
 rich==13.7.0
-    # via
-    #   pyiceberg
-    #   streamlit
-rpds-py==0.17.1
-    # via
-    #   jsonschema
-    #   referencing
+    # via pyiceberg
 rsa==4.9
     # via google-auth
-scipy==1.16.1
-    # via
-    #   -r requirements.in
-    #   statsmodels
 sendgrid==6.11.0
     # via -r requirements.in
 six==1.16.0
-    # via
-    #   patsy
-    #   python-dateutil
-smmap==5.0.1
-    # via gitdb
+    # via python-dateutil
 sniffio==1.3.0
     # via anyio
 sortedcontainers==2.4.0
     # via pyiceberg
 soupsieve==2.5
     # via beautifulsoup4
-st-btn-select==0.1.2
-    # via -r requirements.in
 starkbank-ecdsa==2.2.0
     # via sendgrid
 starlette==0.35.1
     # via fastapi
-statsmodels==0.14.1
-    # via -r requirements.in
 storage3==2.27.2
     # via supabase
-streamlit==1.37.0
-    # via
-    #   -r requirements.in
-    #   extra-streamlit-components
-    #   st-btn-select
-    #   streamlit-authenticator
-streamlit-authenticator==0.2.1
-    # via -r requirements.in
 strenum==0.4.15
     # via supabase-functions
 strictyaml==1.7.3
@@ -435,61 +261,33 @@ supabase-auth==2.27.2
     # via supabase
 supabase-functions==2.27.2
     # via supabase
-tabula-py==2.5.1
-    # via -r requirements.in
 tenacity==8.2.3
-    # via
-    #   plotly
-    #   pyiceberg
-    #   streamlit
+    # via pyiceberg
 toml==0.10.2
-    # via
-    #   pytest
-    #   streamlit
-toolz==0.12.1
-    # via altair
-tornado==6.4
-    # via streamlit
+    # via pytest
 typing-extensions==4.15.0
     # via
     #   fastapi
-    #   pint
     #   pydantic
     #   pydantic-core
-    #   pydash
     #   realtime
-    #   streamlit
     #   typing-inspection
 typing-inspection==0.4.2
     # via pydantic
 tzdata==2023.3
     # via pandas
 urllib3==2.5.0
-    # via
-    #   botocore
-    #   requests
+    # via requests
 uvicorn==0.27.0.post1
     # via -r requirements.in
-validators==0.22.0
-    # via -r requirements.in
 wand==0.6.13
+    # via pdfplumber
+websockets==15.0.1
     # via
     #   -r requirements.in
-    #   pdfplumber
-websockets==11.0.3
-    # via
-    #   gql
     #   realtime
-werkzeug==3.0.1
-    # via flask
-wordcloud==1.9.4
-    # via -r requirements.in
-xlsxwriter==3.0.3
-    # via -r requirements.in
 yarl==1.22.0
     # via
-    #   aiohttp
-    #   gql
     #   postgrest
     #   storage3
     #   supabase
