@@ -2,6 +2,7 @@
 fastapi==0.109.1
 uvicorn==0.27.0.post1
 gunicorn==22.0.0
+python-multipart==0.0.7
 
 # Database
 supabase==2.27.2
@@ -15,10 +16,12 @@ google-cloud-logging==3.9.0
 # Data Processing
 pandas==2.3.1
 openpyxl==3.1.5
+XlsxWriter==3.0.3
 Pint==0.23
 
 # PDF Processing
 pdfplumber==0.7.6
+tabula-py==2.5.1
 
 # HTML/Web Scraping
 beautifulsoup4==4.11.1
@@ -33,6 +36,8 @@ PyJWT>=2.10.1
 
 # Utilities
 python-dotenv==1.0.0
+geopy==2.4.1
+rapidfuzz==2.13.7
 
 # Testing
 pytest==6.2.5
